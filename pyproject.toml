@@ -1,8 +1,10 @@
 [project]
 name = "mailman"
 version = "0.4.0"
-description = "Gmail triage: a cascade over tangible features judged by TypeSafe Jev"
+description = "Gmail triage with readable rules, a web interface, and a Home Assistant app"
 requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
 dependencies = [
     "typesafe-sdk",
     "google-api-python-client",

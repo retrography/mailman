@@ -33,10 +33,33 @@ As a container: build the `Dockerfile` and mount a folder at `/config`; set `TYP
 - `src/mailman/engine/` — the rule engine: flags, questions, stages, outcomes, jobs, the daemon.
 - `src/mailman/web/` — the interface (FastAPI and one plain JavaScript page).
 - `starter/` — a neutral configuration with an invented person; the app starts from it.
-- `mailman/` — the Home Assistant app manifest and documentation.
+- `mailman/` — the Home Assistant app manifest, documentation and changelog.
 
 Your own configuration (`config/`) and data (`data/`) hold personal details and mail, and are not part of
 this repository.
+
+## Versions
+
+Mailman follows [semantic versioning](https://semver.org). What counts as its interface is the configuration
+format and the app's options.
+
+- **Major** (1.0.0 → 2.0.0): a configuration that worked before no longer loads or behaves differently, or an
+  option is removed. The changelog says what to change.
+- **Minor** (0.4.0 → 0.5.0): something new that existing configurations do not depend on: a detector, a
+  trigger, a screen, an option.
+- **Patch** (0.4.0 → 0.4.1): a fix that changes no configuration.
+
+Before 1.0.0 a minor version may still break a configuration; the changelog calls it out under "Changed".
+Separately, a configuration can state the oldest engine it needs (`min_engine` in `settings.yaml`), and an
+older daemon refuses it instead of misreading it.
+
+The version lives in `mailman/config.yaml` (and `pyproject.toml`); `tools/release.py 0.5.0` raises it and opens
+its section in [the changelog](mailman/CHANGELOG.md). Pushing that builds the image, tags `v0.5.0` and
+publishes the release. A released version's image is never rebuilt; pushes in between publish `:edge`.
+
+## Licence
+
+[MIT](LICENSE).
 
 ## A word of caution
 

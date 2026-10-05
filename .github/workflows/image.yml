@@ -1,14 +1,18 @@
 name: image
-# Builds the app image for amd64 and aarch64 and publishes it as ghcr.io/<owner>/mailman:<version>, the
-# version being the one in mailman/config.yaml. Home Assistant downloads that image.
+# Checks the version, builds the app image for amd64 and aarch64, and publishes it.
+#
+# The version is the one in mailman/config.yaml. The first push that carries a new version publishes
+# ghcr.io/<owner>/mailman:<version> (plus :<major>.<minor> and :latest), tags the commit v<version> and creates
+# the GitHub release from its changelog section. Later pushes with the same version publish :edge only, so a
+# released version never changes under the people who installed it.
 on:
   push:
     branches: [main]
-    paths: [src/**, starter/**, Dockerfile, pyproject.toml, uv.lock, mailman/config.yaml, .github/workflows/image.yml]
+    paths: [src/**, starter/**, mailman/**, Dockerfile, pyproject.toml, uv.lock, .github/workflows/image.yml]
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 jobs:
@@ -19,6 +23,18 @@ jobs:
       - id: version
         run: |
           version=$(sed -nE 's/^version: *"?([^"]+)"?$/\1/p' mailman/config.yaml)
+          project=$(sed -nE 's/^version = "([^"]+)"$/\1/p' pyproject.toml)
+          echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "::error::version '$version' is not MAJOR.MINOR.PATCH"; exit 1; }
+          [ "$version" = "$project" ] || { echo "::error::mailman/config.yaml says $version, pyproject.toml says $project"; exit 1; }
+          grep -q "^## \[$version\]" mailman/CHANGELOG.md || { echo "::error::mailman/CHANGELOG.md has no section for $version"; exit 1; }
+          image=ghcr.io/${{ github.repository_owner }}/mailman
+          if git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null; then
+            echo "new=false" >> "$GITHUB_OUTPUT"
+            echo "tags=$image:edge" >> "$GITHUB_OUTPUT"
+          else
+            echo "new=true" >> "$GITHUB_OUTPUT"
+            echo "tags=$image:$version,$image:${version%.*},$image:latest" >> "$GITHUB_OUTPUT"
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
@@ -33,6 +49,12 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           build-args: BUILD_VERSION=${{ steps.version.outputs.version }}
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/mailman:${{ steps.version.outputs.version }}
-            ghcr.io/${{ github.repository_owner }}/mailman:latest
+          tags: ${{ steps.version.outputs.tags }}
+      - name: Tag and release
+        if: steps.version.outputs.new == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          awk -v v="$VERSION" '$0 ~ "^## \\[" v "\\]" {on=1; next} on && /^## \[/ {exit} on' mailman/CHANGELOG.md > notes.md
+          gh release create "v$VERSION" --target "$GITHUB_SHA" --title "v$VERSION" --notes-file notes.md
