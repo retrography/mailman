@@ -3,6 +3,13 @@
 All notable changes to Mailman. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) as described in the README.
 
+## [0.5.1] - 2026-10-05
+
+### Fixed
+- After an update the browser could show the new page with the previous version's script: the Backup link
+  opened Logs, and Import was still on Health. The page is now sent as one document, script and styles
+  included, and is never cached.
+
 ## [0.5.0] - 2026-10-05
 
 ### Added

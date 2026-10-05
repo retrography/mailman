@@ -502,11 +502,13 @@ def create() -> FastAPI:
 
     @app.get("/")
     def index():
-        """The page, with the script and stylesheet addressed by their modification time (no stale cache)."""
+        """The page as one document, script and stylesheet included, and never cached: a browser (or a proxy in
+        front) then cannot pair a new page with an older script, which is what a separately cached file led to."""
         html = (STATIC / "index.html").read_text()
-        for name in ("app.js", "style.css"):
-            html = html.replace(f"static/{name}", f"static/{name}?v={int((STATIC / name).stat().st_mtime)}")
+        css, js = (STATIC / "style.css").read_text(), (STATIC / "app.js").read_text()
+        html = html.replace('<link rel="stylesheet" href="static/style.css">', f"<style>\n{css}\n</style>", 1)
+        html = html.replace('<script src="static/app.js"></script>', "<script>\n" + js.replace("</script", "<\\/script") + "\n</script>", 1)
         html = html.replace("<body>", f'<body data-version="{VERSION}">', 1)
-        return HTMLResponse(html, headers={"Cache-Control": "no-store"})
+        return HTMLResponse(html, headers={"Cache-Control": "no-store, max-age=0", "Pragma": "no-cache"})
 
     return app
