@@ -1159,11 +1159,15 @@ async function viewHealth() {
       h('div', { class: 'row' }, file, h('button', { class: 'danger', onclick: wrap(async () => {
         if (!file.files[0]) return;
         if (!(await ask('Replace the configuration, log and test set of this installation with the bundle?'))) return;
-        const f = file.files[0], size = 256 * 1024, parts = Math.max(1, Math.ceil(f.size / size));
-        for (let i = 0; i < parts; i++) {   // in small pieces: a proxy in front may refuse one large upload
+        const f = file.files[0], size = 192 * 1024, parts = Math.max(1, Math.ceil(f.size / size));
+        for (let i = 0; i < parts; i++) {   // small pieces as text: the same kind of request as everything else here
           toast(`Uploading… ${Math.round(100 * i / parts)}%`, 60000);
-          const r = await fetch(`api/import?part=${i}&last=${i === parts - 1}`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: f.slice(i * size, (i + 1) * size) });
-          if (!r.ok) { let why = `${r.status} ${r.statusText}`; try { why = (await r.json()).detail || why; } catch (e) { /* not our own answer: a proxy's */ } throw new Error('The upload failed: ' + why); }
+          let bytes;
+          try { bytes = new Uint8Array(await f.slice(i * size, (i + 1) * size).arrayBuffer()); }
+          catch (e) { throw new Error('Your browser could not read the file (' + (e.message || e) + '). Choose it again, from a folder the browser may read, e.g. Downloads.'); }
+          let text = ''; for (let k = 0; k < bytes.length; k += 0x8000) text += String.fromCharCode.apply(null, bytes.subarray(k, k + 0x8000));
+          try { await api('POST', 'api/import', { part: i, last: i === parts - 1, data: btoa(text) }); }
+          catch (e) { throw new Error(`The upload stopped at piece ${i + 1} of ${parts}: ` + (e.message || e)); }
         }
         toast('Imported. The app is restarting…', 15000);
         for (let i = 0; i < 40; i++) { await new Promise(r => setTimeout(r, 3000)); try { if ((await fetch('api/health')).ok && i > 1) break; } catch (e) { /* still restarting */ } }

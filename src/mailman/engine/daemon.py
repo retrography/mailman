@@ -55,6 +55,7 @@ class Daemon:
         self.store = Store(data_dir() / "mailman.db")
         self.svc = gmail.service()
         self.account = gmail._execute(self.svc.users().getProfile(userId="me"))["emailAddress"].lower()
+        self.store.set("gmail_error", "")   # Gmail answered: whatever an earlier run recorded is over
         self.runner = Runner(self.engine, self.svc, self.store, data_dir(), self.dry_run)
         self.stopping = False
         self.started = False

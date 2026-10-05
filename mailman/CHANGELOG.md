@@ -3,6 +3,16 @@
 All notable changes to Mailman. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) as described in the README.
 
+## [0.4.3] - 2026-10-05
+
+### Added
+- `mailman export --config-only`: only the configuration files, without the log and the test set.
+
+### Fixed
+- The import failed in the browser with "Load failed". The bundle is now sent as small text pieces, the same
+  kind of request as the rest of the interface, and a failure says at which piece and why.
+- A "Gmail is not reachable" alert left by an earlier run is cleared when the daemon starts and Gmail answers.
+
 ## [0.4.2] - 2026-10-05
 
 ### Changed

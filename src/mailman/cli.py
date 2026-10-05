@@ -107,7 +107,9 @@ def cmd_clean_label(args: argparse.Namespace) -> None:
 
 
 def cmd_export(args: argparse.Namespace) -> None:
-    """Everything of this installation except the Gmail sign-in, as one file to import elsewhere."""
+    """This installation as one file to import elsewhere: the configuration, and unless --config-only also the
+    log (history, undo, what is known about senders) and the test set (stored emails with the classifier's
+    answers, which test-before-save runs on). Never the Gmail sign-in."""
     import sqlite3
     import tempfile
     import zipfile
@@ -119,6 +121,9 @@ def cmd_export(args: argparse.Namespace) -> None:
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
         for f in sorted(config_dir().glob("*.yaml")):
             z.write(f, f"config/{f.name}")
+        if args.config_only:
+            print(f"{out} ({out.stat().st_size / 1e3:.0f} kB): the configuration only. It holds personal details: keep it private.")
+            return
         if (data / "mailman.db").exists():   # a consistent copy, also while the daemon is running
             with tempfile.TemporaryDirectory() as tmp:
                 copy = sqlite3.connect(Path(tmp) / "mailman.db")
@@ -175,6 +180,8 @@ def main() -> None:
     k.set_defaults(fn=cmd_clean_label)
     x = sub.add_parser("export", help="configuration, log and test set as one file, to import in another installation")
     x.add_argument("out", nargs="?", default="mailman-export.zip")
+    x.add_argument("--config-only", action="store_true",
+                   help="only the configuration files: no log, no undo history, no test set")
     x.set_defaults(fn=cmd_export)
     w = sub.add_parser("web", help="the web interface (default http://127.0.0.1:8377)")
     w.add_argument("--host", default="127.0.0.1")
