@@ -1,0 +1,63 @@
+# Triggers and jobs: when things run, and everything that is not the per-email rules.
+
+triggers:
+- 'on': new_mail
+  label: INBOX
+  run: classify
+- 'on': label_added
+  label: Blocked
+  run: sync_blocked
+- 'on': start
+  run: retry_failed
+- 'on': interval
+  minutes: 30
+  run: retry_failed
+- 'on': schedule
+  hour: 3
+  run: purge_blocked
+jobs:
+  classify:
+    help: apply the rules to a new email, if it is still in the inbox
+    rules: true
+    only_if_in: INBOX
+  retry_failed:
+    help: 'at start and every half hour: emails whose attempts all failed in the last days. If the first one fails again, the rest wait for the next round'
+    rules: true
+    only_if_in: INBOX
+    ids_from: failed
+  sync_blocked:
+    help: 'you (or Spark) blocked something: add the new senders to the list'
+    sync_list: blocked
+  retro_block:
+    help: 'for each new entry of the blocked list: its existing mail is labelled Blocked and deleted'
+    search: from:{entry} -label:Blocked -in:trash -in:spam
+    outcome: block_everywhere
+    log:
+      decision: block
+      rule: retrospective:{entry}
+  purge_blocked:
+    help: trash old Blocked mail
+    enabled: false
+    search: label:Blocked older_than:7d
+    outcome: delete
+    log:
+      decision: delete
+      rule: nightly_purge
+  unblock:
+    help: 'manual: take entries off the blocked list and move their mail back'
+    manual:
+    - entry
+    search: from:{entry} label:Blocked
+    outcome: unblock
+    log:
+      decision: keep
+      rule: unblock:{entry}
+    include_trash: true
+  clean_label:
+    help: 'manual: apply the current rules to the mail already in a label'
+    manual:
+    - label
+    - relabel
+    search: label:{label}
+    rules: true
+    never_move_to_inbox: true

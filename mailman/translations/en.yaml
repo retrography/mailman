@@ -1,0 +1,13 @@
+configuration:
+  typesafe_api_key:
+    name: TypeSafe API key
+    description: The key of the classifier (TypeSafe Jev). Required.
+  gmail_client_id:
+    name: Google client ID
+    description: From your Google Cloud project's OAuth client (the client_id in credentials.json).
+  gmail_client_secret:
+    name: Google client secret
+    description: From the same OAuth client (the client_secret in credentials.json).
+  gmail_refresh_token:
+    name: Gmail refresh token (optional)
+    description: Leave empty to sign in from Mailman itself (Health, Connect Gmail). Fill it in only if you want to paste a token you made elsewhere.

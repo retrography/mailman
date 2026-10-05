@@ -1,0 +1,402 @@
+# Lists of senders and platforms. Yours fill up as you use mailman (block, safelist, kids, health …).
+safelist:
+  description: senders always rescued into the inbox (wildcard patterns)
+  holds: patterns
+  entries: []
+blocked:
+  description: 'blocked senders: their mail is labelled Blocked and deleted (to Trash). Kept in sync with the label Blocked;
+    unblocking brings the mail back'
+  holds: senders
+  source:
+    gmail_label: Blocked
+  normalise:
+    collapse_to_domain_at: 2
+    never_collapse:
+      lists:
+      - safelist
+      - platforms
+      addresses:
+      - '{{identity | emails}}'
+  on_new_entry: retro_block
+  entries: []
+periodicals:
+  description: 'newsletters you read: label Periodicals, always out of the inbox'
+  holds: senders
+  entries: []
+parcels:
+  description: 'parcel carriers'' sending addresses: label Parcels, always out of the inbox'
+  holds: senders
+  entries:
+  - note: DHL eCommerce (label only)
+    value: noreply@dhlecommerce.nl
+  - note: DHL eCommerce
+    value: noreply@dhlparcel.nl
+  - note: DPD (filter only)
+    value: noreply@dpd.nl
+  - note: GLS Netherlands
+    value: noreply@gls-netherlands.com
+  - note: PostNL
+    value: notificatie@edm.postnl.nl
+  - note: PostNL
+    value: noreply@notificatie.postnl.nl
+  - note: Trunkrs
+    value: support@trunkrs.nl
+  - note: UPS
+    value: pkginfo@ups.com
+  - note: Trunkrs
+    value: noreply@trunkrs.nl
+  - note: DPD
+    value: notificaties@dpd.nl
+  - note: PostNL
+    value: onlineservice@edm.postnl.nl
+  - note: Dragonfly
+    value: notifications@nl.dragonflyinternational.com
+  - note: GoParcel
+    value: noreply@goparcel.nl
+  - note: Sendcloud (tracking on behalf of shops)
+    value: no-reply@sendcloud.com
+  - note: MyParcel (tracking on behalf of shops)
+    value: no-reply@myparcel.nl
+  - note: DHL Paket
+    value: noreply@dhl.de
+  - note: DHL Express On Demand Delivery
+    value: noreply.odd@dhl.com
+  - note: DHL Express pickup
+    value: noreply@dhl.com
+  - note: DHL Express customs details
+    value: noreply.perfectyourshipment@dhl.com
+  - note: DPD Belgium
+    value: noreply@dpd.be
+  - note: DPD UK
+    value: yourorder@dpd.co.uk
+  - note: DPD UK
+    value: yourdelivery@dpd.co.uk
+  - note: Deutsche Post
+    value: noreply-packet@deutschepost.com
+  - note: Canada Post
+    value: donotreply@canadapost.postescanada.ca
+  - note: USPS
+    value: usps_shipping_services@usps.com
+  - note: FedEx
+    value: trackingupdates@fedex.com
+kids:
+  description: 'senders whose mail is about the kids: label Kids'
+  holds: senders
+  entries: []
+health:
+  description: 'senders whose mail is health-related: label Health'
+  holds: senders
+  entries: []
+platforms:
+  description: 'platforms and providers: their sending domains (subdomains included), the languages they write to you in,
+    and whether many unrelated senders share the domain (kind: webmail / sending_service). Never blocked as a whole domain.
+    `account: true` — you have an account there with this address'
+  holds: records
+  match: domains
+  entries:
+  - domains:
+    - amazon.com
+    - amazon.nl
+    - amazon.de
+    - amazon.co.uk
+    - amazon.fr
+    - amazon.ca
+    name: Amazon
+  - domains:
+    - captureone.com
+    name: Capture One
+  - domains:
+    - apple.com
+    languages:
+    - en
+    name: Apple
+  - domains:
+    - netflix.com
+    languages:
+    - en
+    name: Netflix
+  - domains:
+    - paypal.com
+    - paypal.nl
+    languages:
+    - en
+    name: PayPal
+  - domains:
+    - ebay.com
+    languages:
+    - en
+    name: eBay
+  - domains:
+    - google.com
+    - youtube.com
+    languages:
+    - en
+    name: Google
+  - domains:
+    - facebookmail.com
+    - facebook.com
+    languages:
+    - en
+    name: Facebook
+  - domains:
+    - tiktok.com
+    languages:
+    - en
+    name: TikTok
+  - domains:
+    - linkedin.com
+    languages:
+    - en
+    name: LinkedIn
+  - domains:
+    - microsoft.com
+    languages:
+    - en
+    name: Microsoft
+  - domains:
+    - x.com
+    - twitter.com
+    languages:
+    - en
+    name: Twitter/X
+  - domains:
+    - instagram.com
+    languages:
+    - en
+    name: Instagram
+  - domains:
+    - spotify.com
+    languages:
+    - en
+    name: Spotify
+  - domains:
+    - openai.com
+    languages:
+    - en
+    name: OpenAI
+  - domains:
+    - anthropic.com
+    languages:
+    - en
+    name: Anthropic
+  - domains:
+    - pinterest.com
+    languages:
+    - en
+    name: Pinterest
+  - domains:
+    - uber.com
+    languages:
+    - en
+    name: Uber
+  - domains:
+    - airbnb.com
+    languages:
+    - en
+    name: Airbnb
+  - domains:
+    - github.com
+    languages:
+    - en
+    name: GitHub
+  - domains:
+    - property.booking.com
+    relays: stays
+    name: Booking.com property messages
+    note: written by the hotel in its own language, relayed by Booking.com
+  - domains:
+    - booking.com
+    languages:
+    - en
+    name: Booking.com
+  - domains:
+    - dropbox.com
+    languages:
+    - en
+    name: Dropbox
+  - domains:
+    - whatsapp.com
+    languages:
+    - en
+    name: WhatsApp
+  - domains:
+    - telegram.org
+    languages:
+    - en
+    name: Telegram
+  - domains:
+    - revolut.com
+    languages:
+    - en
+    name: Revolut
+  - domains:
+    - wise.com
+    languages:
+    - en
+    name: Wise
+  - domains:
+    - snapchat.com
+    languages:
+    - en
+    name: Snapchat
+  - domains:
+    - threads.net
+    - threads.com
+    name: Threads
+  - domains:
+    - signal.org
+    name: Signal
+  - domains:
+    - gmail.com
+    - googlemail.com
+    kind: webmail
+    name: Gmail
+  - domains:
+    - yahoo.com
+    - ymail.com
+    kind: webmail
+    name: Yahoo Mail
+  - domains:
+    - outlook.com
+    - hotmail.com
+    - live.com
+    - msn.com
+    kind: webmail
+    name: Outlook.com
+  - domains:
+    - icloud.com
+    - me.com
+    - mac.com
+    kind: webmail
+    name: iCloud Mail
+  - domains:
+    - aol.com
+    kind: webmail
+    name: AOL Mail
+  - domains:
+    - gmx.com
+    - gmx.net
+    - mail.com
+    kind: webmail
+    name: GMX / Mail.com
+  - domains:
+    - proton.me
+    - protonmail.com
+    kind: webmail
+    name: Proton Mail
+  - domains:
+    - rediffmail.com
+    kind: webmail
+    name: Rediffmail
+  - domains:
+    - yandex.com
+    - yandex.ru
+    kind: webmail
+    name: Yandex Mail
+  - domains:
+    - mail.ru
+    kind: webmail
+    name: Mail.ru
+  - domains:
+    - qq.com
+    kind: webmail
+    name: QQ Mail
+  - domains:
+    - 163.com
+    kind: webmail
+    name: NetEase 163
+  - domains:
+    - ccsend.com
+    - constantcontact.com
+    kind: sending_service
+    name: Constant Contact
+  - domains:
+    - medallia.com
+    kind: sending_service
+    name: Medallia
+  - domains:
+    - shopifyemail.com
+    kind: sending_service
+    name: Shopify Email
+  - domains:
+    - hs-send.com
+    - hubspotemail.net
+    kind: sending_service
+    name: HubSpot
+  - domains:
+    - sendgrid.net
+    kind: sending_service
+    name: SendGrid
+  - domains:
+    - mcsv.net
+    - mcdlv.net
+    - mailchimp.com
+    kind: sending_service
+    name: Mailchimp
+  - domains:
+    - amazonses.com
+    kind: sending_service
+    name: Amazon SES
+  - domains:
+    - sparkpostmail.com
+    kind: sending_service
+    name: SparkPost
+  - domains:
+    - mailgun.org
+    - mailgun.net
+    kind: sending_service
+    name: Mailgun
+  - domains:
+    - sendinblue.com
+    - brevosend.com
+    kind: sending_service
+    name: Brevo
+  - domains:
+    - klaviyomail.com
+    kind: sending_service
+    name: Klaviyo
+  - domains:
+    - mktomail.com
+    kind: sending_service
+    name: Marketo
+  - domains:
+    - exacttarget.com
+    kind: sending_service
+    name: Salesforce Marketing Cloud
+  - domains:
+    - judge.me
+    kind: sending_service
+    name: Judge.me
+  - domains:
+    - mailjet.com
+    kind: sending_service
+    name: Mailjet
+  - domains:
+    - postmarkapp.com
+    kind: sending_service
+    name: Postmark
+  - domains:
+    - zendesk.com
+    kind: sending_service
+    name: Zendesk
+  - domains:
+    - freshdesk.com
+    kind: sending_service
+    name: Freshdesk
+marketplaces:
+  description: marketplaces between people — all their mail (bids, messages, sales, purchases) goes under Notifications, kept
+    together
+  holds: senders
+  entries:
+  - note: eBay
+    value: ebay.com
+  - note: eBay Canada
+    value: ebay.ca
+  - note: eBay Netherlands
+    value: ebay.nl
+  - note: eBay France
+    value: ebay.fr
+  - note: eBay Hong Kong
+    value: ebay.com.hk
+  - note: eBay Singapore
+    value: ebay.com.sg

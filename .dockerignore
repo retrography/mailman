@@ -1,0 +1,7 @@
+# Only the code, the lock file and the starter configuration go into the image.
+*
+!pyproject.toml
+!uv.lock
+!src
+!starter
+**/__pycache__

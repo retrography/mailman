@@ -1,0 +1,366 @@
+# Jev: what it is shown, the questions, and when each is asked (src/mailman/engine/jevq.py).
+
+input:
+  wrap: email
+  fields:
+    from_name: sender.name
+    from_address: sender.address
+    reply_to:
+      field: reply_to.address
+      blank: null
+    to_name:
+      field: my_name
+      blank: null
+    subject: subject
+    body:
+      field: body
+      max_chars: 2500
+      fallback: snippet
+yes_threshold: 0.5
+option_sets:
+  person_codes:
+    recipient_full: The recipient named with one or both of `recipient_last_names`, with or without the first name
+      or one of `titles` — and with no other first name. E.g. 'Dear Mr. Jansen', 'Jansen, Alex', 'Beste
+      meneer Jansen', 'Monsieur Jansen'. A name part may differ from the recipient's by at most one character (e.g.
+      'Aleks'); more than that is another name.
+    recipient_first: 'The recipient by first name only: `recipient_first_name` used as a first name, with no last
+      name and no initial of a last name. E.g. ''Dear Alex'', ''Hi alex'', ''Dear Aleks'' (at most one character
+      different). Not a username or a name with numbers (e.g. ''alex1234'').'
+    recipient_username: The recipient by one of `recipient_usernames`, used as the name in the greeting or as the
+      account name, e.g. 'Hi alexj', 'Hello aj88'. Not any other username.
+    kids: One of `kids_names` — full name, first name alone, or first name with any of their middle or last names
+      (e.g. 'Emma', 'Noah James', 'Mia Smith').
+    partner: One of `partner_names` — full name or first name alone (e.g. 'Sam').
+    co_parent: One of `co_parent_names` — full name or first name alone (e.g. 'Robin').
+    other: Any other named person. Includes a name where `recipient_first_name` is a last or middle name (e.g. 'Mr. Alex', 'Alex
+      Alex', 'Sina Alex', 'Mohammed Alex Shareef'), the first name followed by another last name or by
+      an initial other than that of a last name (e.g. 'Alex B.', 'Alex Khan'), or another first name with one of `recipient_last_names`
+      that is not one of `kids_names`.
+    none: 'No person is named: a generic greeting (''Dear customer''), no greeting, or only an email address or
+      a username that is not one of `recipient_usernames` (an address or unknown username is not a name).'
+  languages:
+    en: English
+    nl: Dutch
+    fr: French
+    de: German
+    es: Spanish
+    it: Italian
+    pt: Portuguese
+    fa: Persian (Farsi)
+    ar: Arabic
+    ur: Urdu
+    ps: Pashto
+    tr: Turkish
+    he: Hebrew
+    hi: Hindi
+    bn: Bengali
+    ta: Tamil
+    ms: Malay
+    id: Indonesian
+    tl: Tagalog / Filipino
+    zh: Chinese
+    ja: Japanese
+    ko: Korean
+    ru: Russian
+    uk: Ukrainian
+    pl: Polish
+    ro: Romanian
+    sv: Swedish
+    da: Danish
+    'no': Norwegian
+    fi: Finnish
+    el: Greek
+    cs: Czech
+    hu: Hungarian
+    th: Thai
+    vi: Vietnamese
+    sw: Swahili
+    yo: Yoruba
+    other: Another language, not in this list.
+    none: 'No language can be told: no text, only a code or a link, or unreadable characters.'
+questions:
+  written_in:
+    type: choice
+    ask: first
+    question: In which language is the body of this email written? Answer the language of its own sentences, the
+      ones that carry the message. Do not go by people's names, company or product names, addresses, quoted
+      posts or messages of other people, or a fixed footer. If the email says the same thing in two languages,
+      answer the one that comes first.
+    options:
+      use: languages
+  addressee:
+    type: choice
+    ask: first
+    context:
+      recipient_first_name: '{{identity.first_name}}'
+      recipient_last_names: '{{identity.last_names}}'
+      titles: '{{identity.titles}}'
+      recipient_usernames: '{{identity.usernames}}'
+      kids_names: '{{identity.household.kids | full_names}}'
+      partner_names: '{{identity.household.partner | full_names}}'
+      co_parent_names: '{{identity.household.co_parent | full_names}}'
+    question: Who is this email addressed to, meaning the person it speaks to as 'you'? Look at the recipient name
+      and the greeting; a name in the subject counts only when the subject speaks to that person. Someone the
+      email is merely about is not the addressee, e.g. the host, guest, seller, buyer, driver or other party of
+      a booking or order ('Reservation Confirmed - Jan Jansen', 'New message from Anna').
+    options:
+      use: person_codes
+      override:
+        other: The email greets, or is made out to, a named person who is none of the above. Includes a name where
+          `recipient_first_name` is a last or middle name (e.g. 'Mr. Alex', 'Sina Alex', 'Mohammed Alex Shareef'), the
+          first name followed by another last name or by an initial other than that of a last name (e.g. 'Alex B.', 'Alex
+          Khan'), or another first name with one of `recipient_last_names` that is not one of `kids_names`. Not a person who
+          is only mentioned, such as the host or guest of a booking, a seller, or whoever sent a message.
+        none: 'Nobody is greeted or named as the recipient: a generic greeting (''Dear customer''), no greeting, only
+          an email address or a username that is not one of `recipient_usernames`, or only names of people the
+          email is about.'
+  other_named_person:
+    type: choice
+    ask: first
+    context:
+      recipient_first_name: '{{identity.first_name}}'
+      recipient_last_names: '{{identity.last_names}}'
+      titles: '{{identity.titles}}'
+      recipient_usernames: '{{identity.usernames}}'
+      kids_names: '{{identity.household.kids | full_names}}'
+      partner_names: '{{identity.household.partner | full_names}}'
+      co_parent_names: '{{identity.household.co_parent | full_names}}'
+    question: Apart from the person the email is addressed to, does the email name another person as the customer,
+      account holder, passenger, patient, pupil, or subject of the email? Do not count the sender or anyone who
+      signs the email.
+    options:
+      use: person_codes
+      override:
+        none: No other person is named, apart from the addressee and the sender.
+  text_country:
+    type: choice
+    ask: first
+    question: 'In which country is the sender of this email? 1) If the email shows the sender''s postal address,
+      answer that address''s country. 2) Otherwise, judge from the currency together with the rest of the content:
+      place names, local services, laws, holidays. A currency used in several countries (€, $) is not enough on
+      its own; a single-country currency (₹, PKR, AED, OMR, ₪, £, CAD, TRY) is strong evidence. If € or $ appears
+      together with another currency, the other currency decides (€ and $ are also used internationally). Mentions
+      of where an offer applies do not say where the sender is.'
+    options_from: countries
+    extra_options:
+      none: Nothing in the text indicates the sender's country.
+  sender_type:
+    type: choice
+    ask: first
+    question: What kind of sender is this email from? Judge from the email itself and common sense.
+    options:
+      individual: A private person writing personally.
+      company: A registered business or brand — as far as can be told from the email and common sense (e.g. Facebook
+        is a company even though it sells nothing to the reader).
+      website: A website or online service, but it is unclear whether a legitimate company is behind it.
+      government: 'A government body: municipality, ministry, tax office, public agency.'
+      public: 'A public institution: school, university, hospital, library, public childcare or broadcaster.'
+      nonprofit: 'A non-profit: association, charity, club, professional body, political organisation.'
+      none: The kind of sender cannot be determined.
+  theme:
+    type: choice
+    ask: first
+    question: What is the main topic of this email? Judge the topic only, not whether the email is wanted,
+      legitimate, or for whom.
+    options:
+      account_access: 'Signing in to an account: sign-in alerts, login codes, password resets, security alerts.'
+      account_recovery_contact: 'A notice about the recovery or contact details of an account, already done
+        or for information: a recovery / contact / backup address or contact was added, changed, used, or
+        removed; someone wants the reader as their recovery contact. (A backup *code* is not this. A request
+        the reader must confirm with a code to add their address is `account_signup`.)'
+      account_signup: 'A pending request to use the reader''s email address for an account, to be confirmed
+        with a code or link: creating an account, ''someone tried to sign up with your address'', ''confirm
+        / verify your email address'', ''we received a request to add your address to your account''.'
+      account_suspension: An account or service being blocked, suspended, cut off, or full.
+      banking_transactions: 'Money that moved or is being paid out: bank or card transactions, transfers,
+        account statements, payment receipts, and money going to the reader — a refund, credit note, credit
+        invoice, or reimbursement document, also when it is still to be paid (''this is not an invoice you
+        need to pay'', ''the amount will be paid to your bank account''). Not a notice that a message or document
+        is waiting in online banking.'
+      bills_invoices: 'An amount the reader owes: an invoice, bill, or payment reminder for something the
+        reader pays. Not a credit note, refund, or reimbursement (money going to the reader), and not a usage
+        report or a tariff change.'
+      credit_loans: Credit cards, loans, credit limits, credit scores.
+      investing_pension: Stocks, trading, crypto, investment returns, pensions.
+      insurance: 'Insurance of any kind (health, car, home, travel, liability, life): policies, premiums,
+        coverage, claims, and claim statements or reimbursements from an insurer.'
+      money_or_prize_waiting: A payment, payout, refund, prize, or lottery win supposedly waiting for the
+        reader.
+      gambling: Casinos, free spins, betting, gambling bonuses.
+      orders_purchases: Orders, receipts for goods, returns, reviews of a purchase.
+      delivery: Shipping, tracking, parcel delivery.
+      promotions_retail: Sales, discounts, new products, shop promotions.
+      luxury_goods: 'Luxury goods: fashion houses, jewellery, watches, perfume, luxury hotels and residences.'
+      food_dining: Restaurants, food delivery, groceries.
+      travel: Trips, bookings, flights, trains, hotels, car rental.
+      property: Buying, renting, or investing in property or real estate.
+      b2b_supplier: Factories, suppliers, procurement, industrial products, trade shows.
+      family_kids: Children's school, childcare, lessons, clubs, activities.
+      health_medical: Healthcare, pharmacy, medical treatments and appointments (health insurance is `insurance`).
+      sexual_health: Sexual-enhancement medication, remedies, or procedures (e.g. erection pills, penis enlargement).
+      weight_loss: Weight-loss drugs, diet pills, slimming treatments.
+      dating_hookup: Dating, flirting, or someone nearby who wants to meet or chat.
+      sexual_content: Explicit sexual messages, images, or pornography.
+      home_utilities: Energy, water, telecom, internet, household appliances, the home — including usage reports,
+        meter readings, tariff changes, and maintenance.
+      personal_matters: Personal, family, or legal correspondence between people.
+      work_career: Jobs, recruiting, employer and workplace matters.
+      academic_research: Academic journals, papers, research, academic mailing lists and conferences.
+      courses_learning: Courses, lessons, language learning, coaching, self-help.
+      government_legal: Government, tax, municipality, legal matters, visas, immigration.
+      news_media: News, magazines, newsletters, entertainment, streaming.
+      tech_products: Software or app updates, new features, technology products.
+      social_community: Social networks, follows, posts, comments, online communities.
+      events: Invitations to events, webinars, fairs, festivals.
+      charity_politics: Donations, fundraising, political messages.
+      superstition: Religion, spirituality, astrology and horoscopes, esoteric or supernatural services.
+      other: A clear topic that is not in this list.
+      none: No topic can be determined (e.g. an empty or unreadable email).
+  purpose:
+    type: choice
+    ask: first
+    question: Why does this email reach the reader — what is the sender doing?
+    options:
+      transactional: 'An automated, one-to-one message triggered by an event on the reader''s account, order, booking,
+        or request: a confirmation, receipt, code, alert, statement, reminder, or status update. Also a platform''s
+        automatic notice about activity of people the reader follows or is connected to (someone posted, commented,
+        followed, viewed a profile, has an anniversary). Not a message written personally by a person, even if it is
+        about an account, appointment, or request.'
+      service_notice: 'A general update to the customers or members of a service: changed terms, tariffs, features,
+        opening hours, closures.'
+      subscription: 'A newsletter or editorial content that the reader is said to have signed up for: an issue of
+        a publication, a digest, an article series. Not a platform''s automatic notice that a person posted or did
+        something — that is `transactional`.'
+      marketing: A business promoting or selling something to the reader.
+      cold_outreach: An unsolicited pitch, proposal, or contact from someone with no relationship to the reader.
+      none: None of these.
+  expects:
+    type: choice
+    ask: first
+    question: What does this email expect the reader to do? Pick the main request.
+    options:
+      pay: 'Pay an amount that is not collected automatically: an invoice or bill to pay, a payment reminder,
+        a contribution or fee to transfer.'
+      fill_in_or_sign: Fill in, sign, upload, or hand in a form, questionnaire, document, or details that
+        someone needs from the reader. Not an optional review, rating, or feedback survey.
+      reply_or_decide: Reply, confirm, choose, register, or decide something.
+      attend: Come to an appointment, consultation, meeting, or event at a given date (a delivery time slot
+        is not an appointment).
+      rate_or_review: Rate, review, or give feedback on an order, product, stay, ride, or service — optional,
+        nothing depends on it (e.g. 'How was your rental?', 'Write a review', '👍 or 👎?', a satisfaction survey).
+      nothing: 'Nothing: the email only informs — a status update, receipt, statement, overview, newsletter,
+        logbook entry, or a payment that is collected automatically. Optional offers or links (''read more'',
+        ''view online'', ''shop now'', ''rate us'') are not a request.'
+  written_personally:
+    type: yes_no
+    ask: first
+    question: Is this email written personally by a person to the reader, about the reader's own situation (e.g.
+      a teacher, therapist, or staff member writing to you or replying to you)?
+    'yes': 'Yes: a person wrote it for this reader, e.g. ''Dear parents of Emma, today I tried to call you…'', a
+      reply from a named staff member.'
+    'no': 'No: it is generated automatically, or the same text goes to many recipients (a notice, newsletter, promotion,
+      or status update), even if it is signed by a person or uses the reader''s name.'
+  account_about:
+    type: choice
+    ask:
+      when:
+        answer: theme
+        options:
+        - account_access
+        - account_recovery_contact
+        - account_signup
+        - account_suspension
+        sum_at_least: 0.2
+    context:
+      owner_emails: '{{identity.emails}}'
+      owner_usernames: '{{identity.usernames}}'
+      household_emails: '{{identity.household | emails}}'
+    question: Is this email about an online account — one being signed into, created, verified, changed, or recovered?
+      If so, whose account is it?
+    options:
+      owner: The account itself is one of `owner_emails` (written out in full) or is named exactly one of `owner_usernames`
+        (at most one character different). An owner address that only appears as the recovery, contact, or backup
+        address of the account, or as the recipient, does NOT make it the owner's account.
+      household: The account itself is one of `household_emails`.
+      other: 'The email is about an account being signed into, created, verified, changed, or recovered, and that
+        account is anyone else''s or cannot be identified: another address or username, a masked or partly hidden
+        address (e.g. ''m***d@gmail.com''), a name with numbers (e.g. ''alex1234''), or no account named. E.g.
+        ''This is a copy of a security alert sent to x@gmail.com. alex.jansen@gmail.com is the recovery email for this
+        account'' → the account is x@gmail.com → other. E.g. ''x@gmail.com wants to use your email address as their
+        recovery email'' → the account is x@gmail.com → other.'
+      none: Not about an online account. Includes a one-time code or link to open a single message, document, or
+        file (e.g. a secure-mail code), and mail that merely mentions an account.
+  sender_scope:
+    type: choice
+    ask:
+      when:
+        answer: sender_type
+        options:
+        - individual
+        - none
+        sum_below: 0.5
+    question: How widely does the sender of this email operate?
+    options:
+      local: 'One city or area: a single shop, restaurant, clinic, school, dealer, or local office.'
+      national: 'One country: a national bank, telecom, utility, retailer, or government.'
+      international: Several countries or worldwide.
+      none: It cannot be determined.
+  sender_sector:
+    type: choice
+    ask:
+      when:
+        answer: sender_type
+        options:
+        - individual
+        - none
+        sum_below: 0.5
+    question: What sector is the sender of this email in?
+    options:
+      banking_payments: Banks, cards, payment services, money transfer.
+      insurance: Insurance of any kind.
+      investing_pension: Investing, trading, brokers, pensions.
+      telecom_internet: Mobile, phone, internet providers.
+      energy_utilities: Electricity, gas, water, other utilities.
+      retail_fashion: Shops and brands selling goods, fashion, beauty.
+      marketplace_ecommerce: Online marketplaces and e-commerce platforms.
+      food_restaurants: Restaurants, food delivery, groceries.
+      travel_hospitality: Travel, airlines, rail, hotels, booking platforms.
+      logistics_delivery: Couriers, parcel and postal services.
+      automotive: Cars, dealers, garages, mobility.
+      real_estate: Property development, sales, rentals.
+      healthcare_pharma: Healthcare, clinics, pharmacies, medicines.
+      education_childcare: Schools, universities, childcare, courses, lessons.
+      research_publishing: Research, journals, academic publishing.
+      media_entertainment: News, magazines, streaming, music, entertainment.
+      software_tech: Software, apps, online platforms, technology.
+      social_media_dating: Social networks, online communities, dating.
+      gambling_betting: Casinos, betting, lotteries.
+      manufacturing_industrial: Manufacturing, industrial products, B2B suppliers.
+      professional_services: Consulting, legal, accounting, recruitment.
+      sports_fitness: Sports, fitness, clubs, leisure activities.
+      superstition: Religion, spirituality, astrology and horoscopes, psychics, esoteric or supernatural services.
+      public_administration: 'Government services: tax, municipality, ministries, permits.'
+      other: A clear sector that is not in this list.
+      none: The sector cannot be determined.
+  organization:
+    type: choice
+    ask:
+      when:
+        answer: sender_type
+        options:
+        - company
+        - government
+        - public
+        - nonprofit
+        sum_at_least: 0.5
+    question: Which business or organisation is the reader dealing with in this email? If a platform — for example
+      a payment, shipping, returns, e-commerce, invoicing, or mailing service — sends the email on behalf of another
+      business, choose that other business, not the platform.
+    options_from:
+      fact: org_candidates
+      id: org_{i}
+      text: “{value}”
+    extra_options:
+      other: A business or organisation not among the options above.
+      none: The email is not from or on behalf of any business or organisation.
+    answer_as: value

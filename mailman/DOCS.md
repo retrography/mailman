@@ -1,0 +1,44 @@
+# Mailman
+
+Sorts the mail arriving in one Gmail mailbox by rules you can read and change: it labels, files, and deletes
+what you never wanted. A daemon handles new mail; this interface (in the sidebar) shows what it did and why,
+and lets you change every rule, list and question, with a test on real emails before each save.
+
+## Before you start
+
+- **A TypeSafe API key.** The classifier (TypeSafe Jev) reads each email.
+- **Your own Google OAuth client.** In the Google Cloud console: enable the Gmail API, create an OAuth client
+  of type "Desktop app", and set the publishing status (Audience) to "In production" — in "Testing" the
+  sign-in expires after a week. You do not need Google's verification for your own use.
+
+## Setup
+
+1. Configuration tab: enter the TypeSafe API key and the Google client ID and client secret. Start the app.
+2. Open Mailman. Health → **Connect Gmail**: sign in with Google in a new tab; your browser then lands on a
+   `localhost` page that does not load, which is expected. Copy that address and paste it into Mailman.
+3. Profile: replace the invented example person with yourself (names, addresses, languages, countries).
+   Classifier: the question about the addressee has examples with the invented names; adjust them.
+4. Mail that arrives from now on is handled. Existing mail is left alone.
+
+Coming from another installation? Run `mailman export` there and upload the file under Health → "Bring an
+existing installation over". It replaces the configuration, the log and the test set.
+
+## Where things are kept
+
+In the app's own folder, `/addon_configs/<…>_mailman/`, which is part of Home Assistant backups:
+
+- `config/` — the configuration files. Created on first start; an update of the app never overwrites them.
+- `data/` — the log (`mailman.db`), the test set, and the Gmail sign-in (`token.json`). Whoever has that file
+  can read the mailbox, and so can whoever has a backup that contains it.
+
+## Alerts
+
+When something needs attention (the classifier is out of credits, Gmail is disconnected, mail is waiting),
+Mailman says so on every page and in Home Assistant: `binary_sensor.mailman_problem`,
+`sensor.mailman_waiting`, and a notification that disappears when the problem is over.
+
+## What it does to your mail
+
+By default it moves mail to Trash (recoverable for 30 days), adds and removes labels, and takes mail out of
+the inbox. Nothing is deleted for good. Every action is in Logs, with the rule that decided and the facts
+behind it, and can be undone from there.

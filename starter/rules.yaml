@@ -1,0 +1,307 @@
+# Rules: stages, and in each stage the rules with their conditions and results.
+# Conditions test facts (facts.yaml), Jev answers by question name (jev.yaml), and email fields.
+# Syntax: src/mailman/engine/facts.py (conditions) and stages.py (stages and rules).
+
+default_outcome: keep
+
+stages:                          # run in this order (see src/mailman/engine/stages.py)
+  - {name: filter, match: first, on_match: stop}     # first match decides; nothing else runs but `rescue`
+  - {name: label, match: all}                        # every matching rule adds its label
+  - {name: inbox, match: first, only_if: {labelled: true}}   # labelled mail only: first match files it
+  - {name: rescue, match: first, always: true}       # runs last, even after a stop; replaces the outcome
+
+filter:                          # first match wins; no match → keep
+  - name: obfuscated_headers
+    note: filter-evasion padding — a run of 8+ blanks or a 40+ character token in the subject or in the
+          recipient's display name. Nobody writes real mail that way.
+    when: {obfuscated: true}
+    then: spam
+
+  - name: wrong_addressee
+    note: addressed by name to someone who is neither you nor your household (another person's mail sent to
+          your address) — unless it is a reply or forward in a conversation. Senders on your lists are not
+          exempt; mail from you, household, or the safelist is rescued at the end.
+    when: {addressee: other}
+    unless: {is_reply: true}
+    then: delete
+
+  - name: plus_tag_recipient
+    note: sent to a +tag variant of your address (alex+something@gmail.com) — someone else entered it.
+          The +tags you do use are listed in the profile and never count; mail that names you in full is spared too
+    when: {plus_tag: true}
+    unless: {any: [{is_reply: true}, {addressed_to_me_by_name: true}]}
+    then: delete
+
+  - name: address_variant_recipient
+    note: sent to a re-spelling of your address (a.l.e.x@gmail.com) — you never write it that way, so
+          someone else entered it. Needs engine 2.
+    when: {engine: {min: 2}, address_variant: true}
+    unless: {any: [{is_reply: true}, {addressed_to_me_by_name: true}]}
+    then: delete
+
+  - name: signup_where_you_have_an_account
+    note: a request to sign up with, or add, your address on a platform where you already have an account
+          (platforms list, account) — not you
+    when: {theme: account_signup, account_on_platform: true}
+    unless: {is_reply: true}
+    then: delete
+
+  - name: other_persons_account
+    note: account mail (recovery, sign-in, security alert, signup) that names someone else's webmail address
+          — e.g. Google's "x@gmail.com wants to use your email address as their recovery email", "You have a
+          recovery contact request", "Security alert for x@gmail.com". Household addresses don't count.
+    when:
+      names_other_webmail: true
+      theme: [account_recovery_contact, account_access, account_signup, account_suspension]
+    unless: {is_reply: true}
+    then: delete
+
+  - name: gambling_adult
+    note: gambling, betting, adult services → Spam (first, so no earlier rule turns it into a plain delete)
+    when: {theme: [gambling, sexual_content, dating_hookup, sexual_health]}
+    then: spam
+
+  - name: blocked_sender
+    note: an address or domain on the blocked list — labelled Blocked and deleted (unblock brings it back)
+    when: {sender_blocked: true}
+    then: block
+  - name: platform_wrong_language
+    note: a listed platform writing in a language it never uses with you
+    when: {platform_language_ok: false}
+    then: delete
+
+  - name: suspect_language
+    note: the body or the subject is in a language you never use, or a garbled detection
+          (profile.languages.suspects). The subject counts only in a non-Latin script.
+    when: {language_group: suspect}
+    unless: {addressed_to_me_by_name: true}
+    then: delete
+
+  - name: other_language_marketing
+    note: a language you neither read nor use, selling something
+    when: {language_group: other, purpose: [marketing, cold_outreach, subscription]}
+    unless: {addressed_to_me_by_name: true}
+    then: delete
+
+  - name: other_language_local_business
+    note: a language you neither read nor use, from a local business
+    when: {language_group: other, sender_scope: local}
+    unless: {addressed_to_me_by_name: true}
+    then: delete
+
+  - name: suspect_country
+    note: a sender in profile countries.suspect (Gulf except Iran, Israel, India, Pakistan, Malaysia, Singapore)
+    when: {country_group: suspect}
+    unless: {any: [{addressed_to_me_by_name: true}, {sender_type: individual}]}
+    then: delete
+
+  - name: us_uk_credit_loans
+    note: credit cards, loans, credit scores from the US or the UK
+    when: {theme: credit_loans, country: [US, GB]}
+    then: delete
+
+  - name: superstition
+    note: religion, spirituality, astrology / horoscopes, psychics, esoteric services — as the email's topic
+          or as the sender's business (e.g. a horoscope app's login mail)
+    when: {any: [{theme: superstition}, {sender_sector: superstition}]}
+    then: delete
+
+  - name: unwanted_bulk_theme
+    note: marketing, newsletters, and cold pitches on topics you never want, whoever sends them
+    when:
+      purpose: [marketing, subscription, cold_outreach]
+      theme: [weight_loss, b2b_supplier, charity_politics, property, luxury_goods]
+    then: delete
+
+  - name: foreign_local_bulk
+    note: bulk mail from a national or local sender outside the Netherlands and Canada — its market is not
+          you. Transactional mail is left alone (a real receipt, fine, or booking from abroad), and so are
+          government and public senders, mail addressed to you by full name, and senders on your lists.
+    when:
+      purpose: [marketing, subscription, service_notice, cold_outreach]
+      sender_scope: [national, local]
+      country_group: [business, suspect, other]     # a known country …
+      not: {country: [NL, CA]}                       # … other than NL or CA
+    unless:
+      any: [{addressed_to_me_by_name: true}, {sender_type: [government, public]}, {kids_sender: true},
+            {health_sender: true}, {parcels_sender: true}, {periodicals_sender: true}]
+    then: delete
+
+  - name: cold_marketing
+    note: marketing from a sender you have no relationship with (not listed, < 2 earlier emails dealt with).
+          Newsletters are never deleted by this rule.
+    when: {purpose: marketing, known_sender: false}
+    unless: {any: [{is_reply: true}, {written_personally: true}]}
+    then: delete
+
+  - name: unknown_sender_notice
+    note: a notice "to customers or members", an account suspension, or money / a prize waiting, from a
+          sender you have no relationship with — you are not its customer. (Sign-in and signup mail is left
+          alone, because a service you just joined has no history yet.)
+    when:
+      any: [{purpose: service_notice}, {theme: [account_suspension, money_or_prize_waiting]}]
+      known_sender: false
+    unless: {any: [{is_reply: true}, {written_personally: true}]}
+    then: delete
+
+  - name: first_contact_account_mail
+    note: a sign-in code, password reset, security alert, or recovery notice from a sender that has never
+          mailed you before — you have no account there. (Signup / "verify your email" mail is left alone,
+          so a service you join yourself gets through.)
+    when: {theme: [account_access, account_recovery_contact, account_suspension], first_contact: true}
+    unless: {is_reply: true}
+    then: delete
+
+label:                           # after the filter; all matching rules apply (multi-label). Labels never move mail.
+  - name: parcels
+    note: a parcel carrier's track & trace mail (lists.yaml → parcels)
+    when: {parcels_sender: true}
+    label: Parcels
+
+  - name: parcels_by_content
+    note: a courier or postal service that is not on the parcels list, writing about a shipment — not its promotions or newsletters
+    when: {sender_sector: logistics_delivery}
+    unless: {purpose: [marketing, cold_outreach, subscription]}
+    label: Parcels
+
+  - name: kids
+    note: a kids sender (lists.yaml → kids), or the email is addressed to or names one of the kids
+    when: {any: [{kids_sender: true}, {addressee: kids}, {other_named_person: kids}]}
+    label: Kids
+
+  - name: health
+    note: a health sender (lists.yaml → health)
+    when: {health_sender: true}
+    label: Health
+
+  - name: health_by_content
+    note: healthcare mail from a sender that is not on the health list — the topic is healthcare, or the sender is a care provider or pharmacy. Not promotions or newsletters; health insurance is Finances
+    when: {any: [{theme: health_medical}, {sender_sector: healthcare_pharma}]}
+    unless: {purpose: [marketing, cold_outreach, subscription]}
+    label: Health
+
+  - name: marketing
+    note: marketing that survived the filter (i.e. from a sender you know) — parked in Bulk together with newsletters
+    when: {purpose: marketing}
+    label: Bulk
+
+  - name: periodicals
+    note: a periodicals sender (lists.yaml → periodicals)
+    when: {periodicals_sender: true}
+    label: Periodicals
+
+  - name: bulk
+    note: a newsletter from any other address — parked in Bulk, never trashed
+    when: {purpose: subscription}
+    unless: {periodicals_sender: true}
+    label: Bulk
+
+  - name: bills
+    note: an amount charged to you — an invoice, bill, or payment reminder (not marketing)
+    when: {theme: bills_invoices}
+    unless: {purpose: [marketing, cold_outreach, subscription]}
+    label: Bills
+
+  - name: payments
+    note: money that moved — payment receipts, refunds and reimbursements, transfers, bank statements
+    when: {theme: banking_transactions, purpose: transactional}
+    label: Payments
+
+  - name: finances
+    note: your own pension, investments, and insurance (policies, premiums, claims) — not marketing, and not
+          newsletters about investing in general
+    when: {theme: [investing_pension, insurance]}
+    unless: {purpose: [marketing, cold_outreach, subscription]}
+    label: Finances
+
+  - name: shopping
+    note: an automated message about an order, its delivery, or a food order (parcel carriers have their own label; marketplaces between people go under Notifications)
+    when: {theme: [orders_purchases, delivery, food_dining], purpose: transactional}
+    unless: {any: [{parcels_sender: true}, {sender_sector: logistics_delivery}, {sender_in: marketplaces}]}
+    label: Shopping
+
+  - name: travels
+    note: 'travel: bookings, tickets, stays, trips — not promotions or newsletters. A message a hotel sends through its booking platform always counts, even an offer: it can only reach you about a stay you booked'
+    when: {any: [{theme: travel, not: {purpose: [marketing, cold_outreach, subscription]}}, {platform_record.relays: stays}]}
+    label: Travels
+
+  - name: public
+    note: from a government body or public administration (schools, libraries and postal services are not this)
+    when: {any: [{sender_type: government}, {sender_sector: public_administration}]}
+    unless: {parcels_sender: true}
+    label: Public
+
+  - name: marketplaces
+    note: everything from a marketplace between people (eBay and the like) — bids, messages, sales, purchases — kept together under Notifications
+    when: {sender_in: marketplaces}
+    label: Notifications
+
+  - name: notifications
+    note: the catch-all, last — automated or general notices that got no other label (security and login
+          alerts, codes, receipts, confirmations, terms changes)
+    leftover: true                 # only when no label rule above matched
+    when: {purpose: [transactional, service_notice]}
+    label: Notifications
+
+inbox:                           # labelled mail only (for now); first match → out of the inbox. Default: stays.
+  - name: public_stays
+    note: mail from the government or a public authority always stays in the inbox, whatever else it is
+    when: {label_public: true}
+    then: keep
+
+  - name: parcel_tracking
+    note: carriers' track & trace — always out of the inbox
+    when: {label_parcels: true}
+    then: file
+
+  - name: periodicals
+    note: a periodicals sender (lists.yaml → periodicals) — always out of the inbox
+    when: {periodicals_sender: true}
+    then: file
+
+  - name: bulk
+    note: newsletters from any other address — always out of the inbox
+    when: {purpose: subscription}
+    unless: {any: [{is_reply: true}, {written_personally: true}]}
+    then: file
+
+  - name: marketing
+    note: promotions from senders you know — out of the inbox (they always carry calls to action)
+    when: {purpose: marketing}
+    unless: {any: [{is_reply: true}, {written_personally: true}]}
+    then: file
+
+  - name: account_notifications
+    note: sign-in codes, password resets, security alerts, signup and recovery mail — always out of the inbox
+    when:
+      label_notifications: true
+      theme: [account_access, account_recovery_contact, account_signup, account_suspension]
+    then: file
+
+  - name: automated_labels
+    note: Notifications, Shopping, Travels — automated mail that leaves the inbox unless you must turn
+          up for it, fill something in, or pay. Review and rating requests do not count. Mail that also has a
+          careful label (Kids, Health, Public, Bills, Finances) follows the rules below instead.
+    when: {any: [{label_notifications: true}, {label_shopping: true}, {label_travels: true}]}
+    unless:
+      any: [{expects: [attend, fill_in_or_sign, pay]}, {is_reply: true}, {written_personally: true},
+            {label_kids: true}, {label_health: true}, {label_public: true}, {label_bills: true},
+            {label_finances: true}]
+    then: file
+
+  - name: notice
+    note: a general notice to customers or members that surely asks nothing of you
+    when: {purpose: service_notice, expects_nothing: true}
+    unless: {any: [{sender_type: individual}, {is_reply: true}, {written_personally: true}]}
+    then: file
+
+  - name: automated_no_action
+    note: an automated status / receipt / logbook message that surely asks nothing of you
+    when: {purpose: transactional, expects_nothing: true}
+    unless: {any: [{sender_type: individual}, {is_reply: true}, {written_personally: true}]}
+    then: file
+
+rescue:                          # applied last; overrides the filter (the mail goes to the inbox, labels kept)
+  - name: from_me_household_safelist
+    when: {sender_group: [owner, household, safelist]}
+    then: keep

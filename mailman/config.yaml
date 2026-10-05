@@ -1,0 +1,30 @@
+# Home Assistant app manifest. The image is built by .github/workflows/image.yml from this repository.
+name: Mailman
+version: "0.4.0"
+slug: mailman
+url: https://github.com/retrography/mailman
+image: ghcr.io/retrography/mailman
+description: Sorts your Gmail by rules you can read and change - labels, files, and deletes what you never wanted
+arch:
+  - aarch64
+  - amd64
+init: false
+startup: application
+boot: auto
+ingress: true
+ingress_port: 8099
+panel_icon: mdi:email-fast-outline
+panel_title: Mailman
+homeassistant_api: true          # the alerts are shown in Home Assistant too
+watchdog: tcp://[HOST]:[PORT:8099]
+backup: hot
+map:
+  - type: addon_config           # /config in the container: configuration, log, test set, Gmail sign-in
+    read_only: false
+options:
+  typesafe_api_key: ""
+schema:
+  typesafe_api_key: password
+  gmail_client_id: password?
+  gmail_client_secret: password?
+  gmail_refresh_token: password?

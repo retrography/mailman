@@ -1,0 +1,45 @@
+# Settings: switches and limits of the engine. No behaviour is decided here.
+
+mailbox: '{{identity.emails.0}}'
+dry_run: false
+poll_seconds: 300
+idle_renew_seconds: 540
+retry_failed_days: 7
+jev:
+  model: jev-latest
+  base_url: https://api.typesafe.ai
+  concurrency: 8
+email:
+  body:
+    max_chars: 20000
+    cleaning:
+    - replace: https?://\S+
+      with: '[link]'
+    - replace: "[​-‏­͏⁠\uFEFF]"
+      with: ''
+    - replace: '[ \t\r\f\v]+'
+      with: ' '
+    - replace: \n\s*\n+
+      with: '
+
+        '
+  html:
+    plain_is_html_at_tags: 3
+    prefer_when_plain_is_stub:
+      ratio: 3
+      min_words: 60
+addresses:
+  alias_domains:
+    googlemail.com: gmail.com
+    me.com: icloud.com
+    mac.com: icloud.com
+  ignore_dots:
+  - gmail.com
+  ignore_plus_tag: true
+  second_level_labels: [ac, bank, co, com, edu, gov, net, org]
+  pattern: (?<![\w.*•%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+
+  webmail:
+    list: platforms
+    where:
+      kind: webmail
+min_engine: 3                    # the oldest engine that understands this configuration (3: writing systems are built in)

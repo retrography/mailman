@@ -1,0 +1,32 @@
+# Who you are. Questions, flags and rules take these values through {{placeholders}}.
+# This is an invented example: replace every value with your own (Profile page), then review the
+# examples in the classifier's questions, which mention these same invented names.
+
+identity:
+  first_name: Alex
+  last_names: [Jansen]
+  titles: [Mr, Mrs, Ms, Dr]
+  emails:                                  # every address of yours; the first one is the mailbox mailman signs in to
+    - alex.jansen@gmail.com
+  plus_tags: []                            # +tags you use yourself (alex.jansen+shop@gmail.com → shop); any other +tag is someone else
+  usernames: [alexj]                       # names services greet you with
+  postal_address: ''
+  household:                               # their mail is never treated as someone else's
+    kids: []                               # e.g. - {first_name: Emma, last_names: [Jansen], emails: [emma@example.com]}
+    partner: []
+    co_parent: []
+
+places:
+  lives: []
+  works: []
+  lived_in: []
+
+languages:
+  reads: [en]                              # ISO 639-1
+  communicates: []                         # languages you also get legitimate mail in
+  suspects: []                             # languages you never get legitimate mail in
+banks: []                                  # " / " separates names of the same bank
+countries:
+  lived_in: []                             # ISO 3166-1 alpha-2
+  plausible_business: []
+  suspect: []

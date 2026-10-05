@@ -1,0 +1,393 @@
+# Facts: every observation the rules can test, each a detector with parameters
+# (src/mailman/engine/facts.py lists the detector types and the condition syntax).
+# {{…}} takes a value from profile.yaml; $name is another fact's value.
+
+my_name:
+  help: the name the sender used for you in To / Cc
+  addresses:
+    in:
+    - to
+    - cc
+    output: name
+    as: first
+    where:
+      address_is: '{{identity.emails.0}}'
+      name_present: true
+      name_without: '@'
+is_reply:
+  help: 'part of a conversation: a reply header, or a reply / forward subject prefix'
+  any:
+  - header: in-reply-to
+  - pattern: '^\s*(re|antw|aw|sv|fwd?|tr|wg)\s*:'
+    in: subject
+    flags:
+    - ignore_case
+obfuscated:
+  help: 'filter-evasion padding: a run of 8+ blanks or a 40+ character token in the subject or in the recipient''s
+    display name'
+  any:
+  - pattern: \s{8,}|\S{40,}
+    in: subject.stripped
+  - pattern: \s{8,}|\S{40,}
+    in: to.names.stripped
+plus_tag:
+  help: sent to a +tag variant of your address, other than the +tags the profile says you use
+  addresses:
+    in:
+    - to
+    - cc
+    as: bool
+    where:
+      tag_not_in:
+      - '{{identity.plus_tags}}'
+      has_plus_tag: true
+      mailbox_in:
+      - '{{identity.emails | mailboxes}}'
+other_webmail_addresses:
+  help: webmail addresses named in the subject or body that are not yours or your household's
+  addresses:
+    in:
+    - subject
+    - body
+    from_text: true
+    output: mailbox
+    unique: true
+    where:
+      mailbox_not_in:
+      - '{{identity.emails | mailboxes}}'
+      - '{{identity.household | emails | mailboxes}}'
+      not_the_sender: true
+      domain_in:
+        list: platforms
+        where:
+          kind: webmail
+names_other_webmail:
+  derived:
+  - when:
+      other_webmail_addresses:
+        count: 0
+    value: false
+  - value: true
+body_language:
+  help: the language the body is written in, as the classifier reads it (question written_in); empty when it
+    cannot tell
+  derived:
+  - when:
+      written_in: none
+    value: null
+  - value: $written_in
+subject_language:
+  help: the subject's language when its writing system gives it away (Arabic, Persian, Urdu, Pashto, Hebrew,
+    Hindi, Bengali, Tamil, Thai, Korean, Japanese, Chinese, Greek); empty for Latin and Cyrillic script
+  language: subject
+subject_script:
+  script: subject
+language:
+  help: the body's language, else the subject's
+  first_available:
+  - body_language
+  - subject_language
+language_group:
+  help: read / communicate / suspect / other, from profile.languages. A subject in a suspect language makes the
+    email suspect too, but only in a non-Latin script and not when the body is Persian (a short Persian subject
+    reads as Urdu or Arabic)
+  derived:
+  - when:
+      subject_language:
+      - '{{languages.suspects}}'
+      not:
+        body_language: fa
+      subject_script:
+        not:
+        - Latin
+        - none
+    value: suspect
+  - when:
+      language:
+        exists: false
+    value: unknown
+  - when:
+      language:
+      - '{{languages.reads}}'
+    value: read
+  - when:
+      language:
+      - '{{languages.communicates}}'
+    value: communicate
+  - when:
+      language:
+      - '{{languages.suspects}}'
+    value: suspect
+  - value: other
+tld_country:
+  help: country of the sender domain's ending; generic and vanity endings say nothing
+  country:
+    domain: sender.domain
+    vanity:
+    - ai
+    - app
+    - cc
+    - co
+    - dev
+    - fm
+    - gg
+    - io
+    - ly
+    - me
+    - to
+    - tv
+    - ws
+    aliases:
+      uk: GB
+phone_countries:
+  help: countries of the international phone numbers in the body
+  country:
+    phones: body
+    max_chars: 20000
+country:
+  help: Jev's reading of the text, else the domain's country, else a single phone country
+  derived:
+  - when:
+      text_country:
+        not:
+        - none
+        - 'null'
+    value: $text_country
+  - when:
+      tld_country:
+        exists: true
+    value: $tld_country
+  - when:
+      phone_countries:
+        count: 1
+    value: $phone_countries.0
+  - value: null
+country_group:
+  derived:
+  - when:
+      country:
+        exists: false
+    value: unknown
+  - when:
+      country:
+      - '{{countries.plausible_business}}'
+    value: business
+  - when:
+      country:
+      - '{{countries.suspect}}'
+    value: suspect
+  - value: other
+platform_record:
+  list:
+    value: sender.domain
+    'on': platforms
+    returns: record
+platform:
+  derived:
+  - when:
+      platform_record:
+        exists: true
+    value: $platform_record.name
+  - value: null
+platform_language_ok:
+  help: a listed platform writing in one of the languages it uses with you (the body's language, as the classifier reads it)
+  derived:
+  - when:
+      any:
+      - platform_record.languages:
+          exists: false
+      - language:
+          exists: false
+    value: null
+  - when:
+      language:
+        in: $platform_record.languages
+    value: true
+  - value: false
+sender_group:
+  derived:
+  - when:
+      sender.mailbox:
+      - '{{identity.emails | mailboxes}}'
+    value: owner
+  - when:
+      sender.mailbox:
+      - '{{identity.household | emails | mailboxes}}'
+    value: household
+  - when:
+      sender_in: safelist
+    value: safelist
+  - value: other
+sender_blocked:
+  list:
+    value: sender.address
+    'on': blocked
+parcels_sender:
+  list:
+    value: sender.address
+    'on': parcels
+kids_sender:
+  list:
+    value: sender.address
+    'on': kids
+health_sender:
+  list:
+    value: sender.address
+    'on': health
+periodicals_sender:
+  list:
+    value: sender.address
+    'on': periodicals
+shared_sender_domain:
+  help: the sender's domain is shared by unrelated senders
+  list:
+    value: sender.domain
+    'on': platforms
+    where:
+      kind:
+      - webmail
+      - sending_service
+listed_sender:
+  help: on the safelist or a label list, yours or your household's, or a listed platform
+  derived:
+  - when:
+      any:
+      - sender_group:
+        - owner
+        - household
+        - safelist
+      - shared_sender_domain: false
+        platform:
+          exists: true
+      - sender_in:
+        - parcels
+        - kids
+        - health
+        - periodicals
+    value: true
+  - value: false
+sender_key:
+  help: 'what sender history is counted on: the registrable domain, or the exact mailbox on shared domains'
+  derived:
+  - when:
+      shared_sender_domain: true
+    value: $sender.mailbox
+  - value: $sender.registrable
+dealt_with:
+  help: earlier mail from the sender that left the inbox without being trashed, spammed, blocked, or parked in Bulk
+  lookup:
+    search: from:{sender_key} -in:inbox -in:spam -in:trash -label:Blocked -label:Bulk
+    max: 5
+    cache:
+    - min: 2
+      ttl: 30d
+    - ttl: 1d
+known_sender:
+  derived:
+  - when:
+      listed_sender: true
+    value: true
+  - when:
+      dealt_with:
+        exists: false
+    value: null
+  - when:
+      dealt_with:
+        min: 2
+    value: true
+  - value: false
+other_mail:
+  help: other mail from the sender outside Spam and Trash
+  lookup:
+    search: from:{sender_key} -in:spam -in:trash
+    max: 2
+    exclude_self: true
+    cache:
+    - min: 1
+      ttl: forever
+first_contact:
+  derived:
+  - when:
+      listed_sender: true
+    value: false
+  - when:
+      other_mail:
+        exists: false
+    value: null
+  - when:
+      other_mail:
+        min: 1
+    value: false
+  - value: true
+addressed_to_me_by_name:
+  help: by full name or by one of your usernames, with enough confidence
+  derived:
+  - when:
+      addressee:
+      - recipient_full
+      - recipient_username
+      addressee.conf:
+        min: 0.7
+    value: true
+  - value: false
+expects_nothing:
+  help: Jev is at least 90% sure the email asks nothing of you
+  derived:
+  - when:
+      expects:
+        exists: false
+    value: null
+  - when:
+      expects.p.nothing:
+        min: 0.9
+    value: true
+  - value: false
+org_candidates:
+  help: 'possible names of the organisation behind the email: the From name, the line after a sign-off, the © holder,
+    and the domain''s name'
+  extract:
+    sources:
+    - field: sender.name
+      unless_contains: '@'
+    - pattern: (?im)^\W{0,3}(?:best regards|kind regards|regards|sincerely|thanks|thank you|cheers|met vriendelijke
+        groet(?:en)?|groeten|cordialement|bien à vous|mit freundlichen grüßen|با احترام|مع تحياتي|مع أطيب التحيات)\W*\n\W{0,3}([^\n]{2,60})
+      in: body.tail(3000)
+    - pattern: (?i)(?:©|\(c\)|copyright)\s*(?:\d{4}(?:\s*[-–]\s*\d{4})?)?\s*([A-Z][^\n.|]{1,50})
+      in: body.tail(3000)
+    split: \s*(?:,|\||\s[-–—]\s|\sfrom\s|\sat\s|\svia\s|·)\s*
+    split_flags:
+    - ignore_case
+    clean:
+    - replace: '[^\w\s&.''’()-]'
+      with: ' '
+    - replace: (?i)\b(all rights reserved|(\d{4}\s*)?(to|-|–)?\s*\d{4})\b
+      with: ' '
+    - replace: \s+
+      with: ' '
+    - strip: ' .,''’-'
+    - replace: (?i)^(to|and)\s+
+      with: ''
+    keep:
+      min_chars: 2
+      max_chars: 60
+      matching: '[^\W\d_]{2}'
+    append:
+    - sender.domain_label
+    limit: 8
+address_variant:
+  help: sent to a re-spelling of your address that you never use (dots moved or added, e.g. a.l.e.x@gmail.com) — someone else typed it
+  addresses:
+    in:
+    - to
+    - cc
+    as: bool
+    where:
+      respelling_of:
+      - '{{identity.emails}}'
+account_on_platform:
+  help: the sender is a platform where you already have an account with this address (platforms list, account)
+  derived:
+  - when:
+      platform_record.account: true
+    value: true
+  - value: false

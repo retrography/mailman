@@ -1,0 +1,52 @@
+# Secrets and state: never commit OAuth tokens or the local database.
+data/token.json
+data/credentials.json
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Local Claude config (machine-specific)
+.claude/settings.local.json
+
+# Node / TypeScript
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+.env
+dist/
+build/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# secrets anywhere in the tree
+**/token.json
+**/credentials.json
+# fetched mail bodies (personal data) and Jev probe outputs
+data/cache/
+
+# daemon text log
+data/mailman.log
+
+# Your own installation: personal configuration, mail, notes. Never part of the public repository.
+/config/
+/data/
+/docs/
+/DESIGN.md
+/attic/
+/deploy/
+/scripts/
+/.claude/
+*.zip

@@ -1,0 +1,69 @@
+# Outcomes: what each result of a rule does in Gmail (src/mailman/engine/outcomes.py).
+
+keep:
+  help: stays where it is; the labels the rules gave are added
+  do:
+  - add_labels:
+    - $labels
+  log_as: label
+file:
+  help: labels added, out of the inbox
+  do:
+  - add_labels:
+    - $labels
+  - remove_labels:
+    - INBOX
+  undo:
+  - add_labels:
+    - INBOX
+delete:
+  help: to Trash
+  do:
+  - trash
+  log_as: trash
+  undo:
+  - untrash
+spam:
+  help: to Spam
+  do:
+  - add_labels:
+    - SPAM
+  - remove_labels:
+    - INBOX
+  undo:
+  - remove_labels:
+    - SPAM
+  - add_labels:
+    - INBOX
+block:
+  help: label Blocked and to Trash (a blocked sender's mail is deleted; unblocking brings it back)
+  do:
+  - add_labels:
+    - Blocked
+  - remove_labels:
+    - INBOX
+  - trash
+  undo:
+  - untrash
+  - remove_labels:
+    - Blocked
+  - add_labels:
+    - INBOX
+block_everywhere:
+  help: label Blocked and to Trash; out of the inbox and every other label of yours
+  do:
+  - add_labels:
+    - Blocked
+  - remove_labels:
+    - INBOX
+    - user_labels
+  - trash
+  log_as: block
+unblock:
+  help: out of Trash, label Blocked removed, back to the inbox
+  do:
+  - untrash
+  - remove_labels:
+    - Blocked
+  - add_labels:
+    - INBOX
