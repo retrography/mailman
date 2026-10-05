@@ -336,7 +336,9 @@ class Workspace:
             return time.strftime("%d %b %H:%M", time.localtime(int(ts))) if ts.isdigit() else "", text or value
 
         out = []
-        if age is None or age >= 900:
+        token = os.environ.get("MAILMAN_TOKEN_FILE", "")
+        signed_in = bool(os.environ.get("GMAIL_REFRESH_TOKEN")) or bool(token and os.path.exists(token))
+        if signed_in and (age is None or age >= 900):   # without a sign-in the daemon waits; that alert follows
             out.append({"title": "The daemon is not running", "fix": "Start it again. Until then no mail is handled.",
                         "detail": "it has never run here" if age is None else f"last sign of life {age // 60} minutes ago"})
         if state.get("classifier_error"):
@@ -347,10 +349,9 @@ class Workspace:
                    "It is retried every half hour; if it lasts, check the TypeSafe service and the key.")
             out.append({"title": "The classifier is not answering", "detail": f"since {when}: {text}",
                         "fix": fix + " Waiting mail is retried on its own once it works again."})
-        token = os.environ.get("MAILMAN_TOKEN_FILE", "")
-        if not os.environ.get("GMAIL_REFRESH_TOKEN") and not (token and os.path.exists(token)):
+        if not signed_in:
             out.append({"title": "Gmail is not connected", "detail": "no sign-in has been stored yet",
-                        "fix": "Open Health and press Connect Gmail."})
+                        "fix": "Open Health and press Connect Gmail. The daemon starts by itself once you have."})
         elif state.get("gmail_error"):
             when, text = since(state["gmail_error"])
             low = text.lower()

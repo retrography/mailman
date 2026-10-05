@@ -3,6 +3,12 @@
 All notable changes to Mailman. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) as described in the README.
 
+## [0.4.1] - 2026-10-05
+
+### Fixed
+- A fresh install showed "The daemon is not running — start it again" before Gmail was connected. The daemon
+  waits for the sign-in and starts by itself; only "Gmail is not connected" is shown now.
+
 ## [0.4.0] - 2026-10-05
 
 First public release.
