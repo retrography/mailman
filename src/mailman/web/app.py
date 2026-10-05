@@ -41,6 +41,12 @@ def plain_dump(data) -> str:
     return text.removesuffix("...\n")   # the end marker PyYAML adds after a bare value
 
 
+try:
+    from importlib.metadata import version as _version
+    VERSION = _version("mailman")
+except Exception:   # run from a source tree that was never installed
+    VERSION = "dev"
+
 PASTE_REDIRECT = "http://localhost:8765/"   # nothing needs to listen there: the address itself carries the code
 
 
@@ -72,7 +78,7 @@ def create() -> FastAPI:
 
     @app.get("/api/health")
     def health():
-        return ws.health()
+        return {**ws.health(), "version": VERSION}
 
     @app.get("/api/config/{name}")
     def config(name: str):
@@ -472,6 +478,7 @@ def create() -> FastAPI:
         html = (STATIC / "index.html").read_text()
         for name in ("app.js", "style.css"):
             html = html.replace(f"static/{name}", f"static/{name}?v={int((STATIC / name).stat().st_mtime)}")
+        html = html.replace("<body>", f'<body data-version="{VERSION}">', 1)
         return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
     return app

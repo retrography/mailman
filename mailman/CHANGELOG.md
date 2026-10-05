@@ -3,6 +3,13 @@
 All notable changes to Mailman. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) as described in the README.
 
+## [0.4.4] - 2026-10-05
+
+### Fixed
+- A page left open across an update kept running the old version's code against the new server; the import
+  then failed with "[object Object]". The page now notices the update and offers to reload, and such an
+  error is shown in words.
+
 ## [0.4.3] - 2026-10-05
 
 ### Added

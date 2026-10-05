@@ -28,6 +28,7 @@ async function api(method, url, body) {
   if (!res.ok) {
     let msg = res.statusText;
     try { msg = (await res.json()).detail || msg; } catch (e) { /* not JSON */ }
+    if (Array.isArray(msg)) msg = 'The server did not understand this request (' + msg.map(m => `${(m.loc || []).slice(-1)[0]}: ${m.msg}`).join('; ') + '). If the app was just updated, reload this page.';
     throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
   }
   return res.json();
@@ -1207,8 +1208,12 @@ async function strip() {
       h('div', {}, h('span', { class: 'dot ' + (hl.config_problems.length ? 'bad' : 'ok') }), 'configuration'),
       h('div', {}, h('span', { class: 'dot ' + (hl.errors_last_day ? 'warn' : 'ok') }), `${hl.errors_last_day} errors today`),
       h('div', {}, h('span', { class: 'dot ' + (hl.waiting ? 'bad' : 'ok') }), `${hl.waiting} waiting`));
-    document.getElementById('alerts').replaceChildren(...(hl.alerts || []).map(a => h('div', { class: 'banner bad' },
-      h('b', {}, a.title), a.detail ? h('span', {}, ' — ' + a.detail) : null, h('div', { class: 'fix' }, a.fix))));
+    const mine = document.body.dataset.version, stale = hl.version && mine && hl.version !== mine;
+    document.getElementById('alerts').replaceChildren(
+      ...(stale ? [h('div', { class: 'banner warn' }, h('b', {}, `Mailman was updated to ${hl.version}`), ` — this page is still version ${mine}. `,
+        h('button', { class: 'small', onclick: () => location.reload() }, 'Reload'))] : []),
+      ...(hl.alerts || []).map(a => h('div', { class: 'banner bad' },
+        h('b', {}, a.title), a.detail ? h('span', {}, ' — ' + a.detail) : null, h('div', { class: 'fix' }, a.fix))));
   } catch (e) {
     document.getElementById('alerts').replaceChildren(h('div', { class: 'banner bad' }, h('b', {}, 'The interface cannot reach its own server'), ' — ' + (e.message || e)));
   }
