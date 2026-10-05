@@ -20,8 +20,9 @@ and lets you change every rule, list and question, with a test on real emails be
    Classifier: the question about the addressee has examples with the invented names; adjust them.
 4. Mail that arrives from now on is handled. Existing mail is left alone.
 
-Coming from another installation? Run `mailman export` there and upload the file under Health → "Bring an
-existing installation over". It replaces the configuration, the log and the test set.
+Coming from another installation? Export it there (Backup → Export, or `mailman export`) and upload the file
+under Backup → Import. The configuration alone is enough to sort mail; the full bundle adds the log and the
+test set.
 
 ## Where things are kept
 

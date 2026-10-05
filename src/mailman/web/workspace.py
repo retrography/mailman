@@ -344,7 +344,7 @@ class Workspace:
         if state.get("profile_error"):
             out.append({"title": "The profile is not yours yet, so no mail is handled",
                         "detail": state["profile_error"],
-                        "fix": "Import your installation on the Health page, or put your own names and addresses "
+                        "fix": "Import your installation on the Backup page, or put your own names and addresses "
                                "in Profile (your mailbox's address must be among them). Mail is handled as soon as it is."})
         if state.get("classifier_error"):
             when, text = since(state["classifier_error"])

@@ -3,6 +3,18 @@
 All notable changes to Mailman. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) as described in the README.
 
+## [0.5.0] - 2026-10-05
+
+### Added
+- A Backup page with Export (the configuration, or everything including the log and the test set) and Import.
+
+### Changed
+- Import moved from Health to the Backup page.
+
+### Fixed
+- An import started from a page that was still an older version failed with "[object Object]". The server now
+  accepts the upload in either form.
+
 ## [0.4.4] - 2026-10-05
 
 ### Fixed

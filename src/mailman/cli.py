@@ -108,37 +108,17 @@ def cmd_clean_label(args: argparse.Namespace) -> None:
 
 def cmd_export(args: argparse.Namespace) -> None:
     """This installation as one file to import elsewhere: the configuration, and unless --config-only also the
-    log (history, undo, what is known about senders) and the test set (stored emails with the classifier's
-    answers, which test-before-save runs on). Never the Gmail sign-in."""
-    import sqlite3
-    import tempfile
-    import zipfile
-
+    log and the test set. Never the Gmail sign-in."""
+    from mailman import bundle
     from mailman.engine import daemon
     from mailman.engine.config import config_dir
 
-    data, out = daemon.data_dir(), Path(args.out)
-    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
-        for f in sorted(config_dir().glob("*.yaml")):
-            z.write(f, f"config/{f.name}")
-        if args.config_only:
-            print(f"{out} ({out.stat().st_size / 1e3:.0f} kB): the configuration only. It holds personal details: keep it private.")
-            return
-        if (data / "mailman.db").exists():   # a consistent copy, also while the daemon is running
-            with tempfile.TemporaryDirectory() as tmp:
-                copy = sqlite3.connect(Path(tmp) / "mailman.db")
-                with sqlite3.connect(data / "mailman.db") as live:
-                    live.backup(copy)
-                copy.close()
-                z.write(Path(tmp) / "mailman.db", "data/mailman.db")
-        for sub in ("cache/sample", "cache/probe", "testset"):
-            for f in sorted((data / sub).rglob("*")) if (data / sub).exists() else []:
-                if f.is_file():
-                    z.write(f, f"data/{f.relative_to(data)}")
-        if (data / "cache/sample_index.json").exists():
-            z.write(data / "cache/sample_index.json", "data/cache/sample_index.json")
-    print(f"{out} ({out.stat().st_size / 1e6:.0f} MB): configuration, log and test set. It contains personal mail: "
-          f"keep it private. The Gmail sign-in is not in it.")
+    out = bundle.write(Path(args.out), config_dir(), daemon.data_dir(), everything=not args.config_only)
+    size = out.stat().st_size
+    print(f"{out} ({size / 1e3:.0f} kB): the configuration only. It holds personal details: keep it private."
+          if args.config_only else
+          f"{out} ({size / 1e6:.0f} MB): configuration, log and test set. It contains personal mail: keep it "
+          f"private. The Gmail sign-in is not in it.")
 
 
 def cmd_web(args: argparse.Namespace) -> None:

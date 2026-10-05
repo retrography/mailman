@@ -7,6 +7,7 @@ behind something that authenticates (Home Assistant Ingress).
 from __future__ import annotations
 
 import json
+import shutil
 import threading
 import asyncio
 import os
@@ -16,7 +17,7 @@ from pathlib import Path
 
 import yaml
 from fastapi import Body, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from mailman import gmail
@@ -446,27 +447,54 @@ def create() -> FastAPI:
         return HTMLResponse("<p>Gmail is connected. You can close this tab and return to mailman.</p>"
                             "<script>setTimeout(()=>location.href='../../#/health',1200)</script>")
 
+    @app.get("/api/export")
+    def export_bundle(everything: bool = False):
+        """Download this installation as one file: the configuration, or with `everything` also the log and the
+        test set. Never the Gmail sign-in."""
+        import tempfile
+        import time as _time
+
+        from starlette.background import BackgroundTask
+
+        from mailman import bundle
+        tmp = Path(tempfile.mkdtemp()) / "bundle.zip"
+        bundle.write(tmp, ws.dir, ws.data, everything)
+        name = f"mailman-{'full' if everything else 'config'}-{_time.strftime('%Y%m%d')}.zip"
+        return FileResponse(tmp, media_type="application/zip", filename=name,
+                            background=BackgroundTask(shutil.rmtree, tmp.parent, True))
+
     @app.post("/api/import")
-    def import_bundle(part: int = Body(...), last: bool = Body(...), data: str = Body(...)):
-        """A bundle made with `mailman export`, sent in small pieces as base64 text (plain JSON requests pass
-        every proxy and browser the rest of the interface passes). After the last piece the app stops, unpacks
-        it over its configuration and data, and starts again; the Gmail sign-in is kept."""
+    async def import_bundle(request: Request, part: int = 0, last: bool = True):
+        """A bundle from Backup → Export or `mailman export`, sent in pieces: JSON {part, last, data: base64}, or
+        (older pages) the raw bytes with part and last in the address. After the last piece the app stops,
+        unpacks it over its configuration and data, and starts again; the Gmail sign-in is kept."""
         import base64
         import zipfile
 
         target = os.environ.get("MAILMAN_IMPORT")
         if not target:
             raise HTTPException(400, "importing works in the installed app only; here, copy the files yourself")
+        body = await request.body()
+        if "json" in request.headers.get("content-type", ""):
+            try:
+                sent = json.loads(body)
+                part, last, body = int(sent["part"]), bool(sent["last"]), base64.b64decode(sent["data"])
+            except Exception:
+                raise HTTPException(400, "the upload was not understood; reload this page and try again")
         piece = Path(target + ".part")
         if part == 0 and piece.exists():
             piece.unlink()
         with open(piece, "ab") as out:
-            out.write(base64.b64decode(data))
+            out.write(body)
         if not last:
             return {"received": part}
         if not zipfile.is_zipfile(piece):
             piece.unlink()
-            raise HTTPException(400, "that is not a bundle made with `mailman export`")
+            raise HTTPException(400, "that is not a mailman bundle")
+        with zipfile.ZipFile(piece) as z:
+            if not any(n.startswith("config/") for n in z.namelist()):
+                piece.unlink()
+                raise HTTPException(400, "that zip file has no config/ folder in it: not a mailman bundle")
         piece.rename(target)
         return {"restarting": True}
 

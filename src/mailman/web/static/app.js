@@ -1153,28 +1153,6 @@ async function viewHealth() {
       cr.gmail.fixed_token ? h('span', { class: 'muted' }, 'sign-in set in the options') : h('button', { onclick: () => connectGmail() }, cr.gmail.connected ? 'Reconnect' : 'Connect Gmail')),
     line(cr.typesafe.key_present, 'Classifier (TypeSafe Jev)', cr.typesafe.key_present ? 'API key present' : 'TYPESAFE_API_KEY is not set'));
   if (!cr.gmail.client_secrets_present) el.append(h('div', { class: 'banner warn' }, `“Connect Gmail” needs your Google OAuth client: its client id and secret in the options, or the client file at ${cr.gmail.client_secrets_file}.`));
-  if (cr.can_import) {
-    const file = h('input', { type: 'file', accept: '.zip' });
-    el.append(h('h2', {}, 'Bring an existing installation over'), h('div', { class: 'panel' },
-      h('p', { class: 'muted', style: 'margin-top:0' }, 'On the old machine run “mailman export”. It makes one file with the configuration, the log and the test set. Importing it replaces what is here; the Gmail sign-in is kept. The app restarts.'),
-      h('div', { class: 'row' }, file, h('button', { class: 'danger', onclick: wrap(async () => {
-        if (!file.files[0]) return;
-        if (!(await ask('Replace the configuration, log and test set of this installation with the bundle?'))) return;
-        const f = file.files[0], size = 192 * 1024, parts = Math.max(1, Math.ceil(f.size / size));
-        for (let i = 0; i < parts; i++) {   // small pieces as text: the same kind of request as everything else here
-          toast(`Uploading… ${Math.round(100 * i / parts)}%`, 60000);
-          let bytes;
-          try { bytes = new Uint8Array(await f.slice(i * size, (i + 1) * size).arrayBuffer()); }
-          catch (e) { throw new Error('Your browser could not read the file (' + (e.message || e) + '). Choose it again, from a folder the browser may read, e.g. Downloads.'); }
-          let text = ''; for (let k = 0; k < bytes.length; k += 0x8000) text += String.fromCharCode.apply(null, bytes.subarray(k, k + 0x8000));
-          try { await api('POST', 'api/import', { part: i, last: i === parts - 1, data: btoa(text) }); }
-          catch (e) { throw new Error(`The upload stopped at piece ${i + 1} of ${parts}: ` + (e.message || e)); }
-        }
-        toast('Imported. The app is restarting…', 15000);
-        for (let i = 0; i < 40; i++) { await new Promise(r => setTimeout(r, 3000)); try { if ((await fetch('api/health')).ok && i > 1) break; } catch (e) { /* still restarting */ } }
-        location.reload();
-      }) }, 'Import…'))));
-  }
   el.append(h('h2', {}, 'Recent changes'), h('div', { class: 'tablewrap' }, h('table', {}, h('tbody', {},
     hl.events.length ? hl.events.map(e => h('tr', {}, h('td', { style: 'white-space:nowrap;width:1%' }, fmtTime(e.ts)), h('td', { style: 'width:1%' }, badge(e.kind)), h('td', {}, e.detail)))
       : h('tr', {}, h('td', { class: 'muted' }, 'nothing yet'))))));
@@ -1200,6 +1178,38 @@ function connectGmail() {
   document.body.append(d); d.showModal();
 }
 
+// ---------------------------------------------------------------- Backup
+
+async function viewBackup() {
+  const el = main();
+  const cr = await api('GET', 'api/credentials');
+  el.replaceChildren(h('h1', {}, 'Backup'), h('p', { class: 'lead' }, 'Take this installation with you, or bring one in. A bundle is one zip file; it never contains the Gmail sign-in.'));
+  el.append(h('h2', {}, 'Export'), h('div', { class: 'panel' },
+    h('p', { class: 'muted', style: 'margin-top:0' }, 'The configuration is everything mailman needs to sort mail: profile, lists, flags, questions, rules. The full bundle adds the log (history and undo) and the test set (stored emails that “Check and save” runs on); it contains personal mail.'),
+    h('div', { class: 'row' }, h('a', { class: 'btn primary', href: 'api/export', download: '' }, 'Download the configuration'),
+      h('a', { class: 'btn', href: 'api/export?everything=true', download: '' }, 'Download everything'))));
+  const file = h('input', { type: 'file', accept: '.zip' });
+  el.append(h('h2', {}, 'Import'), h('div', { class: 'panel' },
+    h('p', { class: 'muted', style: 'margin-top:0' }, 'Replaces the configuration here with the bundle’s, and the log and test set too if the bundle has them. The Gmail sign-in is kept. The app restarts.'),
+    cr.can_import ? h('div', { class: 'row' }, file, h('button', { class: 'danger', onclick: wrap(async () => {
+      if (!file.files[0]) return;
+      if (!(await ask('Replace the configuration of this installation with the bundle?'))) return;
+        const f = file.files[0], size = 192 * 1024, parts = Math.max(1, Math.ceil(f.size / size));
+        for (let i = 0; i < parts; i++) {   // small pieces as text: the same kind of request as everything else here
+          toast(`Uploading… ${Math.round(100 * i / parts)}%`, 60000);
+          let bytes;
+          try { bytes = new Uint8Array(await f.slice(i * size, (i + 1) * size).arrayBuffer()); }
+          catch (e) { throw new Error('Your browser could not read the file (' + (e.message || e) + '). Choose it again, from a folder the browser may read, e.g. Downloads.'); }
+          let text = ''; for (let k = 0; k < bytes.length; k += 0x8000) text += String.fromCharCode.apply(null, bytes.subarray(k, k + 0x8000));
+          try { await api('POST', 'api/import', { part: i, last: i === parts - 1, data: btoa(text) }); }
+          catch (e) { throw new Error(`The upload stopped at piece ${i + 1} of ${parts}: ` + (e.message || e)); }
+        }
+        toast('Imported. The app is restarting…', 15000);
+        for (let i = 0; i < 40; i++) { await new Promise(r => setTimeout(r, 3000)); try { if ((await fetch('api/health')).ok && i > 1) break; } catch (e) { /* still restarting */ } }
+        location.reload();
+    }) }, 'Import…')) : h('p', {}, 'Importing works in the installed app. Here, unzip the bundle over the config and data folders yourself.')));
+}
+
 async function strip() {
   try {
     const hl = await api('GET', 'api/health');
@@ -1222,7 +1232,7 @@ async function strip() {
 // ---------------------------------------------------------------- routing
 
 const ROUTES = { log: viewLog, rules: viewRules, lists: viewLists, facts: viewFacts, jev: viewJev, outcomes: viewOutcomes,
-  jobs: viewJobs, profile: viewProfile, settings: viewSettings, health: viewHealth };
+  jobs: viewJobs, profile: viewProfile, settings: viewSettings, health: viewHealth, backup: viewBackup };
 
 function route() {
   const name = (location.hash.replace(/^#\//, '') || 'log').split('/')[0];
