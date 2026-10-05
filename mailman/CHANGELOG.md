@@ -20,3 +20,4 @@ First public release.
 - Gmail sign-in from the interface, for a machine without a browser.
 - `mailman export` and an import step, to move an installation.
 - A starter configuration built around an invented person.
+- An icon and a logo for the app.

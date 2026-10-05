@@ -1,3 +1,5 @@
+<p align="center"><img src="mailman/icon.png" width="128" alt=""><br><img src="mailman/logo.png" width="300" alt="Mailman"></p>
+
 # Mailman
 
 Sorts the mail arriving in a Gmail mailbox by rules you can read and change. A classifier (TypeSafe Jev)
