@@ -1,6 +1,6 @@
 # Home Assistant app manifest. The image is built by .github/workflows/image.yml from this repository.
 name: Mailman
-version: "0.4.1"
+version: "0.4.2"
 slug: mailman
 url: https://github.com/retrography/mailman
 image: ghcr.io/retrography/mailman

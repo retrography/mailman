@@ -1,6 +1,6 @@
 [project]
 name = "mailman"
-version = "0.4.1"
+version = "0.4.2"
 description = "Gmail triage with readable rules, a web interface, and a Home Assistant app"
 requires-python = ">=3.12"
 license = "MIT"

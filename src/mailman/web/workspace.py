@@ -341,6 +341,11 @@ class Workspace:
         if signed_in and (age is None or age >= 900):   # without a sign-in the daemon waits; that alert follows
             out.append({"title": "The daemon is not running", "fix": "Start it again. Until then no mail is handled.",
                         "detail": "it has never run here" if age is None else f"last sign of life {age // 60} minutes ago"})
+        if state.get("profile_error"):
+            out.append({"title": "The profile is not yours yet, so no mail is handled",
+                        "detail": state["profile_error"],
+                        "fix": "Import your installation on the Health page, or put your own names and addresses "
+                               "in Profile (your mailbox's address must be among them). Mail is handled as soon as it is."})
         if state.get("classifier_error"):
             when, text = since(state["classifier_error"])
             low = text.lower()
@@ -386,7 +391,7 @@ class Workspace:
         except Exception as e:
             found = [str(e)[:300]]
         age = int(time.time()) - int(beat[0]) if beat else None
-        state = dict(db.execute("SELECT key, value FROM state WHERE key IN ('classifier_error', 'gmail_error', 'config_error')"))
+        state = dict(db.execute("SELECT key, value FROM state WHERE key IN ('classifier_error', 'gmail_error', 'config_error', 'profile_error')"))
         waiting = db.execute("SELECT COUNT(*) FROM (SELECT gmail_id FROM actions WHERE ts >= datetime('now', '-7 days') "
                              "GROUP BY gmail_id HAVING SUM(error IS NULL) = 0)").fetchone()[0]
         alerts = self.alerts(age, state, waiting, found)

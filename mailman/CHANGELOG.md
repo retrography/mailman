@@ -3,6 +3,17 @@
 All notable changes to Mailman. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) as described in the README.
 
+## [0.4.2] - 2026-10-05
+
+### Changed
+- The daemon handles no mail while the mailbox that signed in is not one of the profile's addresses (a fresh
+  install with the invented profile, or before an import). An alert says so.
+- The import is uploaded in small pieces and waits for the app to come back.
+
+### Fixed
+- After signing in on a fresh install, the daemon failed with "Invalid credentials": it signed in to the mail
+  server with the profile's address instead of the account that had signed in.
+
 ## [0.4.1] - 2026-10-05
 
 ### Fixed

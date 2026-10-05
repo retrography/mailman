@@ -54,6 +54,7 @@ class Daemon:
         self.idle_renew = s.get("idle_renew_seconds", 540)
         self.store = Store(data_dir() / "mailman.db")
         self.svc = gmail.service()
+        self.account = gmail._execute(self.svc.users().getProfile(userId="me"))["emailAddress"].lower()
         self.runner = Runner(self.engine, self.svc, self.store, data_dir(), self.dry_run)
         self.stopping = False
         self.started = False
@@ -193,7 +194,7 @@ class Daemon:
     def imap(self) -> IMAPClient:
         creds = gmail.credentials()
         server = IMAPClient("imap.gmail.com", ssl=True, timeout=self.idle_renew + 60)
-        server.oauth2_login(self.engine.config.settings["mailbox"], creds.token)
+        server.oauth2_login(self.account, creds.token)   # the account that signed in, whatever the profile says
         server.select_folder("INBOX", readonly=True)
         return server
 
@@ -211,10 +212,31 @@ class Daemon:
                 server.noop()
         return True
 
+    def profile_is_mine(self) -> bool:
+        """The rules judge mail against the profile (your names, your addresses). If the mailbox that signed in
+        is not one of the profile's addresses, the profile is someone else's — the starter's invented person, or
+        an import still to come — and acting on it would treat your own mail as a stranger's."""
+        mine = [str(e).lower() for e in self.engine.config.profile.get("identity", {}).get("emails", [])]
+        if self.account in mine:
+            self.store.set("profile_error", "")
+            return True
+        self.store.set("profile_error", f"signed in as {self.account}, but the profile lists "
+                                        f"{', '.join(mine) or 'no address'}")
+        return False
+
     def run(self) -> None:
         log.info("mailman daemon started (%s, poll every %ss)", "DRY RUN" if self.dry_run else "LIVE", self.poll)
         backoff = 5
         while not self.stopping:
+            self.store.set("heartbeat", str(int(time.time())))
+            self.reload_if_changed()
+            if not self.profile_is_mine():   # wait for the profile (or an import); no mail is touched meanwhile
+                log.warning("not handling mail: %s", self.store.get("profile_error"))
+                for _ in range(30):
+                    if self.stopping:
+                        break
+                    time.sleep(1)
+                continue
             server = None
             connected_at = time.time()
             try:

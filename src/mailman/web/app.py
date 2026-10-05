@@ -441,21 +441,26 @@ def create() -> FastAPI:
                             "<script>setTimeout(()=>location.href='../../#/health',1200)</script>")
 
     @app.post("/api/import")
-    async def import_bundle(request: Request):
-        """A bundle made with `mailman export`. The app stops, unpacks it over its configuration and data, and
-        starts again; the Gmail sign-in is kept."""
+    async def import_bundle(request: Request, part: int = 0, last: bool = True):
+        """A bundle made with `mailman export`, sent in pieces (a proxy in front may refuse a large upload). After
+        the last piece the app stops, unpacks it over its configuration and data, and starts again; the Gmail
+        sign-in is kept."""
         target = os.environ.get("MAILMAN_IMPORT")
         if not target:
             raise HTTPException(400, "importing works in the installed app only; here, copy the files yourself")
-        part = Path(target + ".part")
-        with open(part, "wb") as out:
+        piece = Path(target + ".part")
+        if part == 0 and piece.exists():
+            piece.unlink()
+        with open(piece, "ab") as out:
             async for chunk in request.stream():
                 out.write(chunk)
+        if not last:
+            return {"received": part}
         import zipfile
-        if not zipfile.is_zipfile(part):
-            part.unlink()
+        if not zipfile.is_zipfile(piece):
+            piece.unlink()
             raise HTTPException(400, "that is not a bundle made with `mailman export`")
-        part.rename(target)
+        piece.rename(target)
         return {"restarting": True}
 
     app.mount("/static", StaticFiles(directory=STATIC), name="static")

@@ -1159,9 +1159,15 @@ async function viewHealth() {
       h('div', { class: 'row' }, file, h('button', { class: 'danger', onclick: wrap(async () => {
         if (!file.files[0]) return;
         if (!(await ask('Replace the configuration, log and test set of this installation with the bundle?'))) return;
-        const r = await fetch('api/import', { method: 'POST', headers: { 'Content-Type': 'application/zip' }, body: file.files[0] });
-        if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
-        toast('Imported. The app is restarting…', 8000); setTimeout(() => location.reload(), 9000);
+        const f = file.files[0], size = 256 * 1024, parts = Math.max(1, Math.ceil(f.size / size));
+        for (let i = 0; i < parts; i++) {   // in small pieces: a proxy in front may refuse one large upload
+          toast(`Uploading… ${Math.round(100 * i / parts)}%`, 60000);
+          const r = await fetch(`api/import?part=${i}&last=${i === parts - 1}`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: f.slice(i * size, (i + 1) * size) });
+          if (!r.ok) { let why = `${r.status} ${r.statusText}`; try { why = (await r.json()).detail || why; } catch (e) { /* not our own answer: a proxy's */ } throw new Error('The upload failed: ' + why); }
+        }
+        toast('Imported. The app is restarting…', 15000);
+        for (let i = 0; i < 40; i++) { await new Promise(r => setTimeout(r, 3000)); try { if ((await fetch('api/health')).ok && i > 1) break; } catch (e) { /* still restarting */ } }
+        location.reload();
       }) }, 'Import…'))));
   }
   el.append(h('h2', {}, 'Recent changes'), h('div', { class: 'tablewrap' }, h('table', {}, h('tbody', {},
