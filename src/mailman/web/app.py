@@ -224,6 +224,37 @@ def create() -> FastAPI:
                 break
         return out
 
+    @app.get("/api/testset/results")   # before /api/testset/{mid}, which would take “results” for an id
+    def testset_results(q: str = "", source: str = "", status: str = "", limit: int = 100, offset: int = 0):
+        return ws.testset_rows(q, source, status, limit, offset)
+
+    @app.get("/api/testset/{mid}")
+    def testset_case(mid: str):
+        try:
+            return ws.case_detail(mid)
+        except KeyError:
+            raise HTTPException(404, "not in the test set")
+
+    @app.put("/api/testset/{mid}")
+    def testset_save(mid: str, decision: str | None = Body(None), labels: list[str] = Body([]), note: str = Body(""),
+                     answers: dict | None = Body(None)):
+        """What you expect of this email (no decision: nothing), a note, and optionally the classifier's answers."""
+        if decision is not None and decision not in ws.engine.config.outcomes:
+            raise HTTPException(400, f"“{decision}” is not an outcome")
+        try:
+            ws.save_case(mid, {"decision": decision, "labels": labels} if decision else None, note, answers)
+        except KeyError:
+            raise HTTPException(404, "not in the test set")
+        return {"ok": True}
+
+    @app.delete("/api/testset/{mid}")
+    def testset_remove(mid: str):
+        try:
+            ws.remove_case(mid)
+        except KeyError:
+            raise HTTPException(404, "not a marked email")
+        return {"ok": True}
+
     @app.post("/api/try")
     def try_facts(id: str = Body(...), name: str | None = Body(None), text: str | None = Body(None)):
         """Every fact's value for one test email — under the current configuration, or a candidate file."""
