@@ -1315,10 +1315,13 @@ async function caseDetail(id, after) {
 // ---------------------------------------------------------------- routing
 
 const ROUTES = { log: viewLog, rules: viewRules, lists: viewLists, facts: viewFacts, jev: viewJev, outcomes: viewOutcomes,
-  testset: viewTestset, jobs: viewJobs, profile: viewProfile, settings: viewSettings, health: viewHealth, backup: viewBackup };
+  testset: viewTestset, actions: viewJobs, profile: viewProfile, settings: viewSettings, health: viewHealth, backup: viewBackup };
+
+const ROUTE_ALIASES = { jobs: 'actions' };   // the Actions page was Automations at #/jobs: old bookmarks still work
 
 function route() {
-  const name = (location.hash.replace(/^#\//, '') || 'log').split('/')[0];
+  let name = (location.hash.replace(/^#\//, '') || 'log').split('/')[0];
+  if (ROUTE_ALIASES[name]) { name = ROUTE_ALIASES[name]; history.replaceState(null, '', '#/' + name); }
   document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('active', a.getAttribute('href') === '#/' + name));
   closeModal();
   main().replaceChildren(h('p', { class: 'muted' }, 'Loading…'));

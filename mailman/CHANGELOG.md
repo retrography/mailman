@@ -12,7 +12,7 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) a
   the test set.
 
 ### Changed
-- The Automations page is now called Actions.
+- The Automations page is now called Actions, at `#/actions`; the old `#/jobs` address still opens it.
 
 ## [0.5.1] - 2026-10-05
 
