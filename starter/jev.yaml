@@ -153,8 +153,8 @@ questions:
       company: A registered business or brand — as far as can be told from the email and common sense (e.g. Facebook
         is a company even though it sells nothing to the reader).
       website: A website or online service, but it is unclear whether a legitimate company is behind it.
-      government: 'A government body: municipality, ministry, tax office, public agency.'
-      public: 'A public institution: school, university, hospital, library, public childcare or broadcaster.'
+      government: 'A government body acting as an authority towards the reader: municipality, ministry, tax office, public agency. Not its news, media or outreach service, newsletter or campaign (those are public).'
+      public: 'A public institution: school, university, hospital, library, public childcare, broadcaster, or the news, media or outreach service of a government body (e.g. a disinformation-monitoring newsletter).'
       nonprofit: 'A non-profit: association, charity, club, professional body, political organisation.'
       none: The kind of sender cannot be determined.
   theme:
