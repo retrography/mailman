@@ -151,6 +151,84 @@ class Workspace:
         e = result["expected"]
         return result["outcome"] == e["decision"] and ("labels" not in e or sorted(result["labels"]) == sorted(e["labels"]))
 
+    # ------------------------------------------------------------ the test set page
+
+    def testset_rows(self, q: str = "", source: str = "", status: str = "", limit: int = 100, offset: int = 0) -> dict:
+        """The test set with what the current configuration does with each email and whether that is what you
+        expect (`ok`), is not (`broken`), or nothing is expected of it (`unmarked`)."""
+        engine, lookups = self.engine, self.lookups()
+        q, rows = q.lower(), []
+        for mid, case in self.cases().items():
+            try:
+                email, answers, expected = self.load_case(mid, case, engine, pending=False)
+                subject, sender = email.msg.h("subject"), email.msg.h("from")
+                if q and q not in sender.lower() and q not in subject.lower() and q not in mid:
+                    continue
+                if source and source != case["source"]:
+                    continue
+                facts = engine.facts(email, answers, lookups)
+                facts.email = email
+                try:
+                    outcome, rule, labels = engine.decide(facts)
+                except Exception as e:   # a rule that cannot be evaluated is a finding, not a crash
+                    outcome, rule, labels = "error", str(e)[:120], []
+            except Exception as e:   # a case file that cannot be read is shown, so it can be removed
+                email, expected, sender, subject, outcome, rule, labels = None, None, "", f"(unreadable: {str(e)[:80]})", "error", "", []
+            res = {"id": mid, "sender": sender, "subject": subject, "source": case["source"], "expected": expected,
+                   "outcome": outcome, "rule": rule, "labels": labels}
+            res["status"] = "unmarked" if not expected else "ok" if self.meets(res) else "broken"
+            rows.append(res)
+        counts = {s: sum(r["status"] == s for r in rows) for s in ("ok", "broken", "unmarked")}
+        sources = sorted({c["source"] for c in self.cases().values()})
+        if status:
+            rows = [r for r in rows if r["status"] == status]
+        rows.sort(key=lambda r: (r["status"] != "broken", r["source"] != "marked", r["sender"].lower()))
+        return {"total": len(rows), "counts": counts, "sources": sources, "rows": rows[offset:offset + limit]}
+
+    def case_detail(self, mid: str) -> dict:
+        cases = self.cases()
+        if mid not in cases:
+            raise KeyError(mid)
+        engine = self.engine
+        email, answers, expected = self.load_case(mid, cases[mid], engine, pending=False)
+        facts = engine.facts(email, answers, self.lookups())
+        facts.email = email
+        outcome, rule, labels = engine.decide(facts)
+        note = json.loads(cases[mid]["case"].read_text()).get("note", "") if "case" in cases[mid] else ""
+        return {"id": mid, "source": cases[mid]["source"], "marked": "case" in cases[mid], "expected": expected,
+                "note": note, "answers": answers, "outcome": outcome, "rule": rule, "labels": labels,
+                "headers": {h: email.msg.h(h) for h in ("from", "to", "cc", "reply-to", "subject", "date") if email.msg.h(h)},
+                "snippet": email.msg.snippet, "body": email.body}
+
+    def save_case(self, mid: str, expected: dict | None, note: str, answers: dict | None) -> None:
+        """Set what you expect of a test email (or clear it), with a note and the classifier's answers. An email
+        from the cached sample joins the marked ones the first time it is changed."""
+        cases = self.cases()
+        if mid not in cases or not re.fullmatch(r"[\w.\-]+", mid):
+            raise KeyError(mid)
+        case = cases[mid]
+        if "case" in case:
+            data = json.loads(case["case"].read_text())
+        else:
+            data = {"raw": json.loads(case["raw"].read_text()), "jev": json.loads(case["probe"].read_text())["jev"]}
+        data["expected"], data["note"] = expected, note
+        if answers is not None:
+            data["jev"] = answers
+        target = self.data / "testset" / f"{mid}.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False))
+        tmp.replace(target)
+        self._emails.pop(mid, None)
+
+    def remove_case(self, mid: str) -> None:
+        """Take a marked email out of the test set (an email of the cached sample comes back as unmarked)."""
+        case = self.cases().get(mid)
+        if case is None or "case" not in case:
+            raise KeyError(mid)
+        case["case"].unlink()
+        self._emails.pop(mid, None)
+
     def stale_questions(self, cand: Engine) -> list[str]:
         """Questions whose text as sent to Jev differs from the current configuration (stored answers are stale)."""
         cases = self.cases()

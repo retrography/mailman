@@ -3,6 +3,17 @@
 All notable changes to Mailman. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) as described in the README.
 
+## [0.6.0] - 2026-10-09
+
+### Added
+- A Test set page: every email the configuration is checked against (the cached sample and the emails you
+  marked), what the rules do with each now, and whether that is what you expect. Open one to read it, set or
+  clear the outcome and labels you expect, add a note, edit the classifier's stored answers, or remove it from
+  the test set.
+
+### Changed
+- The Automations page is now called Actions, at `#/actions`; the old `#/jobs` address still opens it.
+
 ## [0.5.1] - 2026-10-05
 
 ### Fixed

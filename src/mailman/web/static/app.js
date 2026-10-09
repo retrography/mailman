@@ -1047,11 +1047,11 @@ const viewOutcomes = () => entryView({
 function viewJobs() {
   const section = sessionStorage.getItem('jobs-section') || 'jobs';
   const go = id => () => { sessionStorage.setItem('jobs-section', id); viewJobs(); };
-  const sections = [['jobs', 'Automations'], ['triggers', 'Triggers']].map(([id, label]) => ({ label, on: id === section, go: go(id) }));
-  if (section === 'triggers') return entryView({ file: 'jobs', path: ['triggers'], single: true, entryTitle: 'Triggers', title: 'Automations', form: triggersForm, sections,
-    lead: 'When automations run: on new mail in a label, when a label is put on a message, when the daemon starts, once a day, or every so many minutes.' });
+  const sections = [['jobs', 'Actions'], ['triggers', 'Triggers']].map(([id, label]) => ({ label, on: id === section, go: go(id) }));
+  if (section === 'triggers') return entryView({ file: 'jobs', path: ['triggers'], single: true, entryTitle: 'Triggers', title: 'Actions', form: triggersForm, sections,
+    lead: 'When actions run: on new mail in a label, when a label is put on a message, when the daemon starts, once a day, or every so many minutes.' });
   return entryView({
-    file: 'jobs', path: ['jobs'], title: 'Automations', form: jobForm, sections, blank: { help: '', rules: true },
+    file: 'jobs', path: ['jobs'], title: 'Actions', form: jobForm, sections, blank: { help: '', rules: true },
     lead: 'Everything besides deciding about one email: list syncs, retrospective moves, purges, clean-ups.',
     columns: (n, d) => isObj(d) ? (d.enabled === false ? 'off' : d.manual ? 'manual' : '') : '',
     tools: (box, ctx) => {
@@ -1229,13 +1229,99 @@ async function strip() {
   }
 }
 
+// ---------------------------------------------------------------- Test set
+
+const testState = { q: '', source: '', status: '', offset: 0 };
+const TEST_PAGE = 100;
+
+async function viewTestset() {
+  const el = main();
+  const cat = await catalogue();
+  el.replaceChildren(h('h1', {}, 'Test set'),
+    h('p', { class: 'lead' }, 'The emails every change to the configuration is checked against: a cached sample, and the emails you marked with the outcome you expect. Click one to read it, change what you expect of it, or take it out.'));
+  const summary = h('div', { class: 'row', style: 'margin-bottom:10px' });
+  const table = h('div', { class: 'tablewrap' });
+  const count = h('span', { class: 'muted' });
+  const source = h('select', { onchange: e => { testState.source = e.target.value; testState.offset = 0; load(); } });
+  const load = wrap(async () => {
+    const r = await api('GET', 'api/testset/results?' + new URLSearchParams({ ...testState, limit: TEST_PAGE }));
+    const c = r.counts;
+    summary.replaceChildren(
+      h('span', { class: 'badge ' + (c.broken ? 'error' : 'keep') }, c.broken ? `${c.broken} not as expected` : 'all expectations met'),
+      h('span', { class: 'muted' }, `${c.ok} as expected · ${c.unmarked} with no expectation`));
+    source.replaceChildren(h('option', { value: '' }, 'any source'), r.sources.map(x => h('option', { value: x, selected: x === testState.source }, x)));
+    count.textContent = `${r.total.toLocaleString()} emails` + (r.total > TEST_PAGE ? ` · showing ${testState.offset + 1}–${testState.offset + r.rows.length}` : '');
+    table.replaceChildren(h('table', {},
+      h('thead', {}, h('tr', {}, ['From', 'Subject', 'Source', 'You expect', 'Gets now'].map(t => h('th', {}, t)))),
+      h('tbody', {}, r.rows.length ? r.rows.map(x => h('tr', { class: 'click', onclick: () => caseDetail(x.id, load) },
+        h('td', { class: 'clip', style: 'width:22%' }, x.sender), h('td', { class: 'clip', style: 'width:34%' }, x.subject),
+        h('td', {}, h('span', { class: 'muted' }, x.source)),
+        h('td', {}, x.expected ? [badge(x.expected.decision), ' ', (x.expected.labels || []).map(l => [badge(l, 'label'), ' '])] : h('span', { class: 'muted' }, '—')),
+        h('td', {}, resultCell(x), x.status === 'broken' ? badge('differs', 'error') : null)))
+        : h('tr', {}, h('td', { colspan: 5, class: 'muted' }, 'No emails match.')))));
+  });
+  const input = h('input', { class: 'grow', placeholder: 'Search sender or subject', value: testState.q });
+  input.oninput = () => { testState.q = input.value; testState.offset = 0; clearTimeout(viewTestset.t); viewTestset.t = setTimeout(load, 250); };
+  el.append(summary, h('div', { class: 'row', style: 'margin-bottom:10px' }, input, source,
+    h('select', { onchange: e => { testState.status = e.target.value; testState.offset = 0; load(); } },
+      [['', 'any status'], ['broken', 'not as expected'], ['ok', 'as expected'], ['unmarked', 'no expectation']].map(([v, t]) => h('option', { value: v, selected: v === testState.status }, t))),
+    h('button', { onclick: () => { testState.offset = Math.max(0, testState.offset - TEST_PAGE); load(); } }, '‹'),
+    h('button', { onclick: () => { testState.offset += TEST_PAGE; load(); } }, '›'), count), table);
+  load();
+}
+
+async function caseDetail(id, after) {
+  const [d, cat] = await Promise.all([api('GET', `api/testset/${encodeURIComponent(id)}`), catalogue()]);
+  const outcome = h('select', {}, h('option', { value: '' }, '— nothing expected —'),
+    Object.keys(cat.outcomes).map(o => h('option', { value: o, selected: d.expected && d.expected.decision === o }, o)));
+  const labels = h('input', { class: 'grow', placeholder: 'expected labels, comma-separated (optional)', value: ((d.expected || {}).labels || []).join(', ') });
+  const note = h('input', { class: 'grow', placeholder: 'why (optional)', value: d.note || '' });
+  const answersText = JSON.stringify(d.answers, null, 1);
+  const answers = h('textarea', { rows: 10, spellcheck: 'false' }, answersText);
+  const body = h('div', {});
+  body.append(h('h2', {}, d.headers.subject || '(no subject)'),
+    h('dl', { class: 'kv' }, Object.entries(d.headers).filter(([k]) => k !== 'subject').map(([k, v]) => [h('dt', {}, k), h('dd', {}, v)]),
+      h('dt', {}, 'Source'), h('dd', {}, d.source),
+      h('dt', {}, 'Gets now'), h('dd', {}, badge(d.outcome), ' ', d.labels.map(l => [badge(l, 'label'), ' ']), h('span', { class: 'muted' }, ' ' + (d.rule || 'no rule')))),
+    h('h3', {}, 'The email as the rules read it'), h('pre', { style: 'max-height:260px;overflow:auto;white-space:pre-wrap' }, d.body || d.snippet || '(empty)'),
+    h('h3', {}, 'What you expect'),
+    h('p', { class: 'muted', style: 'margin-top:0' }, 'Every later change to the configuration is checked against this. ' +
+      (d.marked ? '' : 'Changing it adds this email to the marked ones.')),
+    h('div', { class: 'row' }, outcome, labels), h('div', { class: 'row', style: 'margin-top:8px' }, note),
+    h('h3', {}, "The classifier's stored answers"),
+    h('p', { class: 'muted', style: 'margin-top:0' }, 'What the classifier said about this email, as JSON. Edit them to try a different answer; the rules read these instead of asking again.'),
+    answers);
+  const save = wrap(async () => {
+    let parsed = null;
+    if (answers.value !== answersText) {
+      try { parsed = JSON.parse(answers.value); } catch (e) { throw new Error('The classifier answers are not valid JSON: ' + e.message); }
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('The classifier answers must be a JSON object.');
+    }
+    await api('PUT', `api/testset/${encodeURIComponent(id)}`, {
+      decision: outcome.value || null, labels: labels.value.split(',').map(s => s.trim()).filter(Boolean), note: note.value, answers: parsed });
+    toast('saved'); closeModal(); after();
+  });
+  const remove = wrap(async () => {
+    if (!(await ask(`Take “${d.headers.subject || id}” out of the test set?`))) return;
+    await api('DELETE', `api/testset/${encodeURIComponent(id)}`);
+    toast('removed from the test set'); closeModal(); after();
+  });
+  body.append(h('div', { class: 'foot' },
+    d.marked ? h('button', { class: 'danger', onclick: remove }, d.source === 'marked' ? 'Remove from the test set' : 'Remove') : null,
+    h('button', { onclick: closeModal }, 'Close'), h('button', { class: 'primary', onclick: save }, 'Save')));
+  modal(body, true);
+}
+
 // ---------------------------------------------------------------- routing
 
 const ROUTES = { log: viewLog, rules: viewRules, lists: viewLists, facts: viewFacts, jev: viewJev, outcomes: viewOutcomes,
-  jobs: viewJobs, profile: viewProfile, settings: viewSettings, health: viewHealth, backup: viewBackup };
+  testset: viewTestset, actions: viewJobs, profile: viewProfile, settings: viewSettings, health: viewHealth, backup: viewBackup };
+
+const ROUTE_ALIASES = { jobs: 'actions' };   // the Actions page was Automations at #/jobs: old bookmarks still work
 
 function route() {
-  const name = (location.hash.replace(/^#\//, '') || 'log').split('/')[0];
+  let name = (location.hash.replace(/^#\//, '') || 'log').split('/')[0];
+  if (ROUTE_ALIASES[name]) { name = ROUTE_ALIASES[name]; history.replaceState(null, '', '#/' + name); }
   document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('active', a.getAttribute('href') === '#/' + name));
   closeModal();
   main().replaceChildren(h('p', { class: 'muted' }, 'Loading…'));

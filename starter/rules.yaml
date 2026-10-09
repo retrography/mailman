@@ -228,7 +228,7 @@ label:                           # after the filter; all matching rules apply (m
   - name: public
     note: from a government body or public administration (schools, libraries and postal services are not this)
     when: {any: [{sender_type: government}, {sender_sector: public_administration}]}
-    unless: {parcels_sender: true}
+    unless: {any: [{parcels_sender: true}, {purpose: subscription}]}
     label: Public
 
   - name: marketplaces
@@ -245,8 +245,9 @@ label:                           # after the filter; all matching rules apply (m
 
 inbox:                           # labelled mail only (for now); first match → out of the inbox. Default: stays.
   - name: public_stays
-    note: mail from the government or a public authority always stays in the inbox, whatever else it is
+    note: mail from the government or a public authority stays in the inbox, unless it is a subscription/newsletter
     when: {label_public: true}
+    unless: {purpose: subscription}
     then: keep
 
   - name: parcel_tracking
