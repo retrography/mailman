@@ -3,6 +3,23 @@
 All notable changes to Mailman. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) as described in the README.
 
+## [0.7.0] - 2026-10-10
+
+### Added
+- A second mailbox: Outlook.com or Microsoft 365, through Microsoft Graph, sorted by the same rules as Gmail.
+  Connect it on Health (a code typed on Microsoft's page) or with `mailman auth --outlook`; it needs your own
+  Microsoft app registration (options `outlook_client_id` and `outlook_tenant`). Labels become categories,
+  filing moves mail to Archive, and new mail is noticed within a minute. The Documentation tab lists what
+  differs from Gmail.
+- Settings `outlook.poll_seconds` and `outlook.archive_folder`.
+
+### Changed
+- One daemon runs per connected mailbox, and Health shows each. `mailman daemon` starts one process per
+  mailbox; `--account` runs a single one.
+- The log records which mailbox each email is in, and undo and "This was wrong" act there. An existing log is
+  upgraded at the first start; its emails count as Gmail's.
+- A job run from Actions runs in every connected mailbox.
+
 ## [0.6.0] - 2026-10-09
 
 ### Added

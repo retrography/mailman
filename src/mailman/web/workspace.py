@@ -19,12 +19,12 @@ import re
 
 import yaml
 
-from mailman import gmail
+from mailman import mailbox
 from mailman.engine import validate
 from mailman.engine.config import FILES, Config, config_dir
 from mailman.engine.core import Engine
 from mailman.engine.daemon import data_dir
-from mailman.engine.lookups import GmailLookups
+from mailman.engine.lookups import MailboxLookups
 from mailman.store import Store
 from mailman.web import yamltext
 
@@ -34,23 +34,32 @@ class Workspace:
         self.dir, self.data = config_dir(), data_dir()
         self._engine = Engine(Config(self.dir))
         self.store = Store(self.data / "mailman.db")
-        self._svc = None
+        self._boxes: dict[str, object] = {}
         self._emails: dict[str, object] = {}
         self._emails_key = ""
         self.overlay: dict[str, dict] = {}   # re-asked answers for a pending jev.yaml edit: id → {question: answer}
 
-    # ------------------------------------------------------------ Gmail (optional)
+    # ------------------------------------------------------------ mailboxes (optional)
 
-    def svc(self):
-        if self._svc is None:
+    def box(self, account: str | None = None):
+        """A connected mailbox, or None. Without a name: the first one that has a sign-in (Gmail, if it has)."""
+        account = account or next(iter(mailbox.connected()), "gmail")
+        if account not in self._boxes:
             try:
-                self._svc = gmail.service()
+                self._boxes[account] = mailbox.connect(account, self._engine.config.settings)
             except Exception:
                 return None
-        return self._svc
+        return self._boxes[account]
+
+    def boxes(self) -> list:
+        return [b for b in map(self.box, mailbox.connected()) if b is not None]
+
+    def forget(self, account: str) -> None:
+        """The account signed in again: connect anew on the next use."""
+        self._boxes.pop(account, None)
 
     def lookups(self):
-        return GmailLookups(self.svc(), self.data / "mailman.db") if self.svc() else None
+        return MailboxLookups(self.box(), self.data / "mailman.db") if self.box() else None
 
     # ------------------------------------------------------------ files
 
@@ -366,18 +375,19 @@ class Workspace:
             args.append(f"%{rule}%")
         sql = " FROM actions WHERE " + " AND ".join(where)
         total = db.execute("SELECT COUNT(*)" + sql, args).fetchone()[0]
-        rows = db.execute("SELECT id, ts, gmail_id, sender, subject, decision, rule, action, dry_run, error" + sql +
-                          " ORDER BY id DESC LIMIT ? OFFSET ?", [*args, limit, offset]).fetchall()
-        keys = ("row", "ts", "gmail_id", "sender", "subject", "decision", "rule", "action", "dry_run", "error")
+        rows = db.execute("SELECT id, ts, gmail_id, sender, subject, decision, rule, action, dry_run, error, account" +
+                          sql + " ORDER BY id DESC LIMIT ? OFFSET ?", [*args, limit, offset]).fetchall()
+        keys = ("row", "ts", "gmail_id", "sender", "subject", "decision", "rule", "action", "dry_run", "error", "account")
         return {"total": total, "rows": [dict(zip(keys, r)) for r in rows]}
 
     def log_row(self, row: int) -> dict:
         db = sqlite3.connect(self.data / "mailman.db")
         r = db.execute("SELECT id, ts, gmail_id, thread_id, sender, subject, decision, rule, action, dry_run, error, "
-                       "tokens, facts, jev FROM actions WHERE id = ?", (row,)).fetchone()
+                       "tokens, facts, jev, account FROM actions WHERE id = ?", (row,)).fetchone()
         keys = ("row", "ts", "gmail_id", "thread_id", "sender", "subject", "decision", "rule", "action", "dry_run",
-                "error", "tokens", "facts", "jev")
+                "error", "tokens", "facts", "jev", "account")
         d = dict(zip(keys, r))
+        d["mailbox"] = mailbox.TITLES.get(d["account"], d["account"])
         d["facts"], d["jev"] = json.loads(d["facts"] or "{}"), json.loads(d["jev"] or "{}")
         d["rules"] = self.rule_definitions(d["rule"])
         return d
@@ -407,23 +417,27 @@ class Workspace:
         return counts
 
     @staticmethod
-    def alerts(age: int | None, state: dict, waiting: int, config_problems: list[str]) -> list[dict]:
+    def alerts(state: dict, waiting: int, config_problems: list[str]) -> list[dict]:
         """What needs your attention, most urgent first: {title, detail, fix}."""
         def since(value: str) -> tuple[str, str]:
             ts, _, text = value.partition(" ")
             return time.strftime("%d %b %H:%M", time.localtime(int(ts))) if ts.isdigit() else "", text or value
 
         out = []
-        token = os.environ.get("MAILMAN_TOKEN_FILE", "")
-        signed_in = bool(os.environ.get("GMAIL_REFRESH_TOKEN")) or bool(token and os.path.exists(token))
-        if signed_in and (age is None or age >= 900):   # without a sign-in the daemon waits; that alert follows
-            out.append({"title": "The daemon is not running", "fix": "Start it again. Until then no mail is handled.",
-                        "detail": "it has never run here" if age is None else f"last sign of life {age // 60} minutes ago"})
-        if state.get("profile_error"):
-            out.append({"title": "The profile is not yours yet, so no mail is handled",
-                        "detail": state["profile_error"],
-                        "fix": "Import your installation on the Backup page, or put your own names and addresses "
-                               "in Profile (your mailbox's address must be among them). Mail is handled as soon as it is."})
+        accounts = mailbox.connected()
+        many = len(accounts) > 1
+        for a in accounts:   # without a sign-in the daemon waits; that alert follows
+            title, beat = mailbox.TITLES[a], state.get(mailbox.key("heartbeat", a))
+            age = int(time.time()) - int(beat) if beat else None
+            if age is None or age >= 900:
+                out.append({"title": f"The daemon is not running{f' for {title}' if many else ''}",
+                            "fix": "Start it again. Until then no mail is handled.",
+                            "detail": "it has never run here" if age is None else f"last sign of life {age // 60} minutes ago"})
+            if state.get(mailbox.key("profile_error", a)):
+                out.append({"title": f"The profile is not yours yet, so no {f'{title} ' if many else ''}mail is handled",
+                            "detail": state[mailbox.key("profile_error", a)],
+                            "fix": "Import your installation on the Backup page, or put your own names and addresses "
+                                   "in Profile (your mailbox's address must be among them). Mail is handled as soon as it is."})
         if state.get("classifier_error"):
             when, text = since(state["classifier_error"])
             low = text.lower()
@@ -432,16 +446,18 @@ class Workspace:
                    "It is retried every half hour; if it lasts, check the TypeSafe service and the key.")
             out.append({"title": "The classifier is not answering", "detail": f"since {when}: {text}",
                         "fix": fix + " Waiting mail is retried on its own once it works again."})
-        if not signed_in:
+        if not accounts:
             out.append({"title": "Gmail is not connected", "detail": "no sign-in has been stored yet",
                         "fix": "Open Health and press Connect Gmail. The daemon starts by itself once you have."})
-        elif state.get("gmail_error"):
-            when, text = since(state["gmail_error"])
-            low = text.lower()
-            fix = ("Connect Gmail again on the Health page: the sign-in has expired or was withdrawn."
-                   if "invalid_grant" in low or "expired" in low or "revoked" in low or "authenticat" in low else
-                   "It reconnects on its own; if it lasts, check the network and the Gmail sign-in.")
-            out.append({"title": "Gmail is not reachable", "detail": f"since {when}: {text}", "fix": fix})
+        for a in accounts:
+            if state.get(mailbox.key("mailbox_error", a)):
+                title = mailbox.TITLES[a]
+                when, text = since(state[mailbox.key("mailbox_error", a)])
+                low = text.lower()
+                fix = (f"Connect {title} again on the Health page: the sign-in has expired or was withdrawn."
+                       if "invalid_grant" in low or "expired" in low or "revoked" in low or "authenticat" in low else
+                       f"It reconnects on its own; if it lasts, check the network and the {title} sign-in.")
+                out.append({"title": f"{title} is not reachable", "detail": f"since {when}: {text}", "fix": fix})
         if state.get("config_error"):
             out.append({"title": "The daemon refused the current configuration", "detail": state["config_error"],
                         "fix": "It keeps working on the last good one. Fix the file, or restart the daemon if it "
@@ -460,7 +476,6 @@ class Workspace:
 
     def health(self) -> dict:
         db = sqlite3.connect(self.data / "mailman.db")
-        beat = db.execute("SELECT value FROM state WHERE key = 'heartbeat'").fetchone()
         last = db.execute("SELECT ts, sender, action FROM actions ORDER BY id DESC LIMIT 1").fetchone()
         errors = db.execute("SELECT COUNT(*) FROM actions WHERE error IS NOT NULL AND ts >= datetime('now', '-1 day')"
                             ).fetchone()[0]
@@ -468,12 +483,19 @@ class Workspace:
             found = validate.problems(Engine(Config(self.dir)))
         except Exception as e:
             found = [str(e)[:300]]
-        age = int(time.time()) - int(beat[0]) if beat else None
-        state = dict(db.execute("SELECT key, value FROM state WHERE key IN ('classifier_error', 'gmail_error', 'config_error', 'profile_error')"))
+        state = dict(db.execute("SELECT key, value FROM state"))
+        daemons = []   # one per mailbox that has a sign-in (before any sign-in: Gmail's, which is waiting for one)
+        for a in mailbox.connected() or ["gmail"]:
+            beat = state.get(mailbox.key("heartbeat", a))
+            age = int(time.time()) - int(beat) if beat else None
+            daemons.append({"account": a, "mailbox": mailbox.TITLES[a], "seconds_since_heartbeat": age,
+                            "running": age is not None and age < 900})
+        ages = [d["seconds_since_heartbeat"] for d in daemons]
+        age = None if None in ages else max(ages)   # the page's one light: the daemon that is worst off
         waiting = db.execute("SELECT COUNT(*) FROM (SELECT gmail_id FROM actions WHERE ts >= datetime('now', '-7 days') "
                              "GROUP BY gmail_id HAVING SUM(error IS NULL) = 0)").fetchone()[0]
-        alerts = self.alerts(age, state, waiting, found)
-        return {"alerts": alerts, "waiting": waiting,
+        alerts = self.alerts(state, waiting, found)
+        return {"alerts": alerts, "waiting": waiting, "daemons": daemons,
                 "daemon_seconds_since_heartbeat": age, "daemon_running": age is not None and age < 900,
                 "last_email": {"ts": last[0], "sender": last[1], "action": last[2]} if last else None,
                 "errors_last_day": errors, "config_problems": found, "test_emails": len(self.cases()),

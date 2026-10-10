@@ -1,10 +1,11 @@
-"""The daemon: keeps an IMAP IDLE connection on the inbox, and on every wake-up (or at the poll interval)
-runs the triggers of config/jobs.yaml against what changed in the mailbox.
+"""The daemon: watches the inbox of one mailbox (Gmail: an IMAP IDLE connection; Outlook: asking every minute),
+and on every wake-up (or at the poll interval) runs the triggers of config/jobs.yaml against what changed
+there. One daemon per mailbox; `mailman daemon` starts one for each mailbox that has a sign-in.
 
 Triggers:  new_mail (a message arrived in a label) · label_added (a label was put on a message) ·
            start (once per start) · schedule (once a day, during the given hour) ·
            interval (every so many minutes, at the next wake-up)
-Everything is logged in data/mailman.db. With dry-run nothing in Gmail changes.
+Everything is logged in data/mailman.db. With dry-run nothing in the mailbox changes.
 Stop with Ctrl-C or SIGTERM: the email in hand is finished first; a second signal stops at once.
 """
 
@@ -14,14 +15,12 @@ import asyncio
 import logging
 import os
 import signal
+import subprocess
+import sys
 import time
 from pathlib import Path
 
-from googleapiclient.errors import HttpError
-from imapclient import IMAPClient
-from imapclient.exceptions import IMAPClientError
-
-from mailman import gmail
+from mailman import mailbox
 from mailman.engine.core import Engine
 from mailman.engine.jobs import Runner
 from mailman.store import Store
@@ -46,17 +45,17 @@ def load_env(path: Path = ROOT / ".env") -> None:
 
 
 class Daemon:
-    def __init__(self, dry_run: bool | None = None, poll: int | None = None):
+    def __init__(self, dry_run: bool | None = None, poll: int | None = None, account: str = "gmail"):
         self.engine = Engine()
         s = self.engine.config.settings
         self.dry_run = s.get("dry_run", False) if dry_run is None else dry_run
         self.poll = poll or s.get("poll_seconds", 300)
         self.idle_renew = s.get("idle_renew_seconds", 540)
         self.store = Store(data_dir() / "mailman.db")
-        self.svc = gmail.service()
-        self.account = gmail._execute(self.svc.users().getProfile(userId="me"))["emailAddress"].lower()
-        self.store.set("gmail_error", "")   # Gmail answered: whatever an earlier run recorded is over
-        self.runner = Runner(self.engine, self.svc, self.store, data_dir(), self.dry_run)
+        self.box = mailbox.connect(account, s)
+        self.account = self.box.address()
+        self.set("mailbox_error", "")   # the mailbox answered: whatever an earlier run recorded is over
+        self.runner = Runner(self.engine, self.box, self.store, data_dir(), self.dry_run)
         self.stopping = False
         self.started = False
         self.last_run: dict[str, float] = {}   # job → when an interval trigger last ran it
@@ -68,6 +67,13 @@ class Daemon:
             raise SystemExit(1)
         self.stopping = True
         log.info("%s received: finishing the current email, then stopping", signal.Signals(signum).name)
+
+    def get(self, name: str) -> str | None:
+        """A value this mailbox's daemon keeps (checkpoint, heartbeat, errors)."""
+        return self.store.get(mailbox.key(name, self.box.name))
+
+    def set(self, name: str, value: str) -> None:
+        self.store.set(mailbox.key(name, self.box.name), value)
 
     def triggers(self, kind: str) -> list[dict]:
         return [t for t in self.engine.config.jobs["triggers"] if t["on"] == kind]
@@ -95,33 +101,31 @@ class Daemon:
     # ------------------------------------------------------------ what changed in the mailbox
 
     def checkpoint(self) -> str:
-        cp = self.store.get("history_id")
+        cp = self.get("history_id")
         if not cp:   # first start: begin from now, don't process the backlog
-            cp = gmail.history_id(self.svc)
-            self.store.set("history_id", cp)
-            log.info("first start: checkpoint %s (existing mail is left alone)", cp)
+            cp = self.box.checkpoint()
+            self.set("history_id", cp)
+            log.info("first start: checkpoint %s (existing mail is left alone)", cp[-40:])
         return cp
 
     def changes(self) -> tuple[list[dict], list[dict], str]:
         start = self.checkpoint()
         try:
-            return gmail.changes_since(self.svc, start)
-        except HttpError as e:
-            if e.status_code != 404:
-                raise
-            latest = gmail.history_id(self.svc)   # checkpoint too old: restart from now
-            log.warning("checkpoint %s expired; restarting from %s (mail in between is not processed)", start, latest)
+            return self.box.changes(start, watch=[t["label"] for t in self.triggers("label_added")])
+        except mailbox.Expired:
+            latest = self.box.checkpoint()   # checkpoint too old: restart from now
+            log.warning("checkpoint %s expired; restarting from %s (mail in between is not processed)",
+                        start[-40:], latest[-40:])
             return [], [], latest
 
     def process(self) -> None:
-        self.store.set("heartbeat", str(int(time.time())))
+        self.set("heartbeat", str(int(time.time())))
         self.reload_if_changed()
         added, labelled, latest = self.changes()
-        labels = self.runner.labels
 
         # label_added triggers (e.g. you blocked something): list and maintenance jobs, never fatal
         for t in self.triggers("label_added"):
-            lid, own = labels.id(t["label"]), self.runner.own.get(t["label"], set())
+            lid, own = self.box.label_id(t["label"]), self.runner.own.get(t["label"], set())
             hit = [m["id"] for m in [*added, *labelled] if lid in m["labels"] and m["id"] not in own]
             if hit:
                 try:
@@ -144,18 +148,18 @@ class Daemon:
             self.last_run[t["run"]] = time.time()
             job = self.runner.job(t["run"])
             if job.get("ids_from") == "failed":
-                work += [(i, job) for i in self.store.failed(days) if i not in retries]
+                work += [(i, job) for i in self.store.failed(days, self.box.name) if i not in retries]
                 retries = {i for i, _ in work}
         self.started = True
         seen = {i for i, _ in work}
         for t in self.triggers("new_mail"):
-            lid, job = labels.id(t["label"]), self.runner.job(t["run"])
+            lid, job = self.box.label_id(t["label"]), self.runner.job(t["run"])
             for m in added:
                 if lid in m["labels"] and m["id"] not in seen and not self.store.handled(m["id"]):
                     seen.add(m["id"])
                     work.append((m["id"], job))
         if not work:
-            self.store.set("history_id", latest)
+            self.set("history_id", latest)
             return
 
         async def run():
@@ -171,7 +175,7 @@ class Daemon:
 
         asyncio.run(run())
         if not self.stopping:
-            self.store.set("history_id", latest)
+            self.set("history_id", latest)
 
     def run_job(self, name: str, params: dict | None = None):
         job = self.runner.job(name)
@@ -185,33 +189,12 @@ class Daemon:
         """Once a day, during the trigger's hour. If the daemon isn't running then, it waits for the next day."""
         job = self.runner.job(t["run"])
         today, key = time.strftime("%Y-%m-%d"), f"last_run:{t['run']}"
-        if not job.get("enabled", True) or time.localtime().tm_hour != t["hour"] or self.store.get(key) == today:
+        if not job.get("enabled", True) or time.localtime().tm_hour != t["hour"] or self.get(key) == today:
             return
         self.run_job(t["run"])
-        self.store.set(key, today)
+        self.set(key, today)
 
-    # ------------------------------------------------------------ IMAP IDLE loop
-
-    def imap(self) -> IMAPClient:
-        creds = gmail.credentials()
-        server = IMAPClient("imap.gmail.com", ssl=True, timeout=self.idle_renew + 60)
-        server.oauth2_login(self.account, creds.token)   # the account that signed in, whatever the profile says
-        server.select_folder("INBOX", readonly=True)
-        return server
-
-    @staticmethod
-    def start_idle(server: IMAPClient) -> bool:
-        """Enter IDLE. Mail can arrive between two commands ('* 86 EXISTS'); imapclient then mistakes that
-        notice for the reply to IDLE. Consume it with a NOOP and try again. Returns True if mail arrived."""
-        for attempt in range(3):
-            try:
-                server.idle()
-                return False
-            except IMAPClientError as e:
-                if "unexpected response" not in str(e) or attempt == 2:
-                    raise
-                server.noop()
-        return True
+    # ------------------------------------------------------------ the loop
 
     def profile_is_mine(self) -> bool:
         """The rules judge mail against the profile (your names, your addresses). If the mailbox that signed in
@@ -219,77 +202,103 @@ class Daemon:
         an import still to come — and acting on it would treat your own mail as a stranger's."""
         mine = [str(e).lower() for e in self.engine.config.profile.get("identity", {}).get("emails", [])]
         if self.account in mine:
-            self.store.set("profile_error", "")
+            self.set("profile_error", "")
             return True
-        self.store.set("profile_error", f"signed in as {self.account}, but the profile lists "
-                                        f"{', '.join(mine) or 'no address'}")
+        self.set("profile_error", f"signed in as {self.account}, but the profile lists "
+                                  f"{', '.join(mine) or 'no address'}")
         return False
 
     def run(self) -> None:
-        log.info("mailman daemon started (%s, poll every %ss)", "DRY RUN" if self.dry_run else "LIVE", self.poll)
+        log.info("mailman daemon started for %s (%s, poll every %ss)", self.account,
+                 "DRY RUN" if self.dry_run else "LIVE", self.poll)
         backoff = 5
         while not self.stopping:
-            self.store.set("heartbeat", str(int(time.time())))
+            self.set("heartbeat", str(int(time.time())))
             self.reload_if_changed()
             if not self.profile_is_mine():   # wait for the profile (or an import); no mail is touched meanwhile
-                log.warning("not handling mail: %s", self.store.get("profile_error"))
+                log.warning("not handling mail: %s", self.get("profile_error"))
                 for _ in range(30):
                     if self.stopping:
                         break
                     time.sleep(1)
                 continue
-            server = None
+            waiter = None
             connected_at = time.time()
             try:
-                server = self.imap()
+                waiter = self.box.waiter(self.idle_renew)
                 connected_at = time.time()
                 self.process()   # catch up on anything since the checkpoint
-                self.store.set("gmail_error", "")
+                self.set("mailbox_error", "")
                 while not self.stopping:
-                    if self.start_idle(server):   # mail arrived just before IDLE: handle it first
+                    if waiter.arm():   # mail arrived just before the wait: handle it first
                         self.process()
                         continue
-                    deadline = time.time() + min(self.poll, self.idle_renew)
-                    events = []
-                    while time.time() < deadline and not events and not self.stopping:
-                        events = server.idle_check(timeout=min(5, max(1, int(deadline - time.time()))))
-                    self.store.set("heartbeat", str(int(time.time())))
-                    server.idle_done()
+                    waiter.wait(min(self.poll, self.idle_renew), lambda: self.stopping)
+                    self.set("heartbeat", str(int(time.time())))
                     if self.stopping:
                         break
                     self.process()
-                    try:   # long processing can outlive the IMAP connection
-                        server.noop()
-                    except Exception:
-                        log.info("IMAP connection closed while processing; reconnecting")
+                    if not waiter.alive():
+                        log.info("connection closed while processing; reconnecting")
                         break
             except Exception as e:
                 if self.stopping:
                     break
-                if server is not None and time.time() - connected_at > 60:
+                if waiter is not None and time.time() - connected_at > 60:
                     # Gmail closes long-lived IMAP connections (and sleep / network changes do too): expected.
-                    log.info("IMAP connection closed (%s); reconnecting", e)
+                    log.info("connection closed (%s); reconnecting", e)
                     backoff = 5
                     continue
                 log.warning("connection problem (%s); reconnecting in %ss", e, backoff)
-                self.store.set("gmail_error", f"{int(time.time())} {str(e)[:300]}")
+                self.set("mailbox_error", f"{int(time.time())} {str(e)[:300]}")
                 for _ in range(backoff):
                     if self.stopping:
                         break
                     time.sleep(1)
                 backoff = min(backoff * 2, 300)
             finally:
-                if server is not None:
-                    try:
-                        server.logout()
-                    except Exception:
-                        pass
+                if waiter is not None:
+                    waiter.close()
         log.info("stopped")
 
 
-def main(dry_run: bool | None, poll: int | None) -> None:
+def supervise(accounts: list[str], args: list[str]) -> None:
+    """One daemon process per mailbox; one that stops is started again. Ctrl-C or SIGTERM stops them all."""
+    stopping = False
+
+    def stop(*_):
+        nonlocal stopping
+        stopping = True
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(sig, stop)
+    start = lambda a: subprocess.Popen([sys.executable, "-m", "mailman.cli", "daemon", "--account", a, *args])
+    procs = {a: start(a) for a in accounts}
+    began = dict.fromkeys(accounts, time.time())
+    while not stopping:
+        for a, p in procs.items():
+            if p.poll() is not None and time.time() - began[a] > 30:
+                log.warning("the %s daemon stopped (exit %s); starting it again", a, p.returncode)
+                procs[a], began[a] = start(a), time.time()
+        time.sleep(2)
+    for p in procs.values():
+        if p.poll() is None:
+            p.terminate()
+    for p in procs.values():
+        try:
+            p.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            p.kill()
+
+
+def main(dry_run: bool | None, poll: int | None, account: str | None = None) -> None:
     load_env()
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    accounts = [account] if account else (mailbox.connected() or ["gmail"])
+    tag = "" if accounts == ["gmail"] else f" [{accounts[0]}]" if len(accounts) == 1 else " [mailman]"
+    logging.basicConfig(level=logging.INFO, format=f"%(asctime)s %(levelname)s{tag} %(message)s")
     for noisy in ("httpx", "httpx2", "typesafe_sdk", "googleapiclient.discovery_cache", "googleapiclient.http"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
-    Daemon(dry_run=dry_run, poll=poll).run()
+    if len(accounts) > 1:
+        supervise(accounts, (["--dry-run"] if dry_run else []) + (["--poll", str(poll)] if poll else []))
+    else:
+        Daemon(dry_run=dry_run, poll=poll, account=accounts[0]).run()

@@ -2,12 +2,13 @@
 
 A job is one of:
   rules: true                 apply the rules to messages (new mail, a retry, or a label clean-up)
-  sync_list: <list>           fill a list from its `source` (the senders of the mail in a Gmail label),
+  sync_list: <list>           fill a list from its `source` (the senders of the mail in a label),
                               normalise it, save it, and run the list's `on_new_entry` job per new entry
-  search + outcome            perform an outcome on every message a Gmail search finds
+  search + outcome            perform an outcome on every message a search (in Gmail's words) finds
 Options: enabled, only_if_in (a label the message must still carry), include_trash (the search also looks
 in Trash and Spam), log {decision, rule}, manual [params].
 `{name}` in a search or a log text is a parameter of the run (e.g. {entry}, {label}).
+A runner works on one mailbox (mailman.mailbox); what it logs and caches is kept per mailbox.
 """
 
 from __future__ import annotations
@@ -18,35 +19,39 @@ import time
 from email.utils import parseaddr
 from pathlib import Path
 
-from googleapiclient.errors import HttpError
-
-from mailman import gmail
+from mailman import mailbox
 from mailman.engine import lists as elists
 from mailman.engine import outcomes
 from mailman.engine.core import Engine
-from mailman.engine.lookups import GmailLookups
+from mailman.engine.lookups import MailboxLookups
 from mailman.store import Store
 
 log = logging.getLogger("mailman")
 
 
 class Runner:
-    def __init__(self, engine: Engine, svc, store: Store, data: Path, dry_run: bool = False):
-        self.engine, self.svc, self.store, self.data, self.dry_run = engine, svc, store, data, dry_run
-        self.labels = outcomes.Labels(svc)
-        self.lookups = GmailLookups(svc, data / "mailman.db")
+    def __init__(self, engine: Engine, box, store: Store, data: Path, dry_run: bool = False):
+        self.engine, self.box, self.store, self.data, self.dry_run = engine, box, store, data, dry_run
+        self.lookups = MailboxLookups(box, data / "mailman.db")
         self.own: dict[str, set[str]] = {}   # label name → ids this app labelled (their label events are ours)
 
     def job(self, name: str) -> dict:
         return self.engine.config.jobs["jobs"][name]
+
+    def log(self, **entry) -> None:
+        self.store.log(account=self.box.name, **entry)
+
+    def cache(self, name: str) -> Path:
+        """A file this mailbox's jobs keep between runs."""
+        return self.data / "cache" / (name if self.box.name == "gmail" else f"{self.box.name}_{name}")
 
     # ------------------------------------------------------------ one email through the rules
 
     async def classify(self, client, msg_id: str, job: dict) -> bool | None:
         """One email through the rules. True: done; False: it failed (logged, retried later); None: skipped."""
         try:
-            raw = gmail.get(self.svc, msg_id)
-        except HttpError as e:
+            raw = self.box.get(msg_id)
+        except mailbox.ERRORS as e:
             if e.status_code == 404:   # deleted before we got to it
                 return None
             raise
@@ -55,7 +60,7 @@ class Runner:
         if job.get("only_if_in") and job["only_if_in"] not in msg.label_ids:   # moved meanwhile
             if self.store.db.execute("SELECT 1 FROM actions WHERE gmail_id = ? AND error IS NOT NULL", (msg.id,)).fetchone() \
                     and not self.store.handled(msg.id):   # it failed earlier and you dealt with it yourself: no longer waiting
-                self.store.log(gmail_id=msg.id, thread_id=msg.thread_id, sender=msg.h("from"), subject=msg.h("subject"),
+                self.log(gmail_id=msg.id, thread_id=msg.thread_id, sender=msg.h("from"), subject=msg.h("subject"),
                                rule=f"left {job['only_if_in']} before it could be handled", action="none", dry_run=self.dry_run)
             return None
         meta = {"gmail_id": msg.id, "thread_id": msg.thread_id, "sender": msg.h("from"), "subject": msg.h("subject")}
@@ -63,7 +68,7 @@ class Runner:
             c = await self.engine.classify(client, email, self.lookups)
         except Exception as e:
             log.error("classify %s failed: %s", msg.id, e)
-            self.store.log(**meta, action="error", dry_run=self.dry_run, error=f"classify: {e}")
+            self.log(**meta, action="error", dry_run=self.dry_run, error=f"classify: {e}")
             self.store.set("classifier_error", f"{int(time.time())} {str(e)[:300]}")
             return False
         if c["tokens"]:   # the classifier answered: whatever was wrong is over
@@ -75,12 +80,12 @@ class Runner:
             acted = self.perform(spec, c["labels"], [msg.id])
         except Exception as e:
             log.error("%s %s failed: %s", c["decision"], msg.id, e)
-            self.store.log(**meta, **rest, action="error", error=f"{c['decision']}: {e}")
+            self.log(**meta, **rest, action="error", error=f"{c['decision']}: {e}")
             return False
         action = outcomes.action_name(c["decision"], spec, c["labels"], acted)
         if self.dry_run and acted:
             action = f"dry-run:{action}"
-        self.store.log(**meta, **rest, action=action)
+        self.log(**meta, **rest, action=action)
         log.info("%-8s %-22s %s | %s", "keep" if action == "none" else action, c["rule"].split(" (")[0] or "-",
                  msg.h("from")[:40], msg.h("subject")[:60])
         return True
@@ -90,7 +95,7 @@ class Runner:
         trash, add, remove = outcomes.plan(spec, labels)
         if self.dry_run or not ids:
             return bool(ids) and bool(trash or add or remove)
-        acted = outcomes.apply(self.svc, self.labels, spec, labels, ids, batch=batch)
+        acted = outcomes.apply(self.box, spec, labels, ids, batch=batch)
         for name in add:
             self.own.setdefault(name, set()).update(ids)
         return acted
@@ -102,21 +107,21 @@ class Runner:
         if not job.get("enabled", True):
             return []
         params = params or {}
-        ids = gmail.search(self.svc, job["search"].format(**params), include_trash=job.get("include_trash", False))
+        ids = self.box.search(job["search"].format(**params), include_trash=job.get("include_trash", False))
         spec = self.engine.config.outcomes[job["outcome"]]
         failed: dict[str, str] = {}
         try:
             self.perform(spec, [], ids, batch=True)
-        except HttpError:   # a batch failed: one by one, skipping what cannot be changed
+        except mailbox.ERRORS:   # a batch failed: one by one, skipping what cannot be changed
             for i in ids:
                 try:
                     self.perform(spec, [], [i])
-                except HttpError as e:
+                except mailbox.ERRORS as e:
                     failed[i] = str(e)
         word = ("dry-run:" if self.dry_run else "") + spec.get("log_as", job["outcome"])
         entry = job.get("log", {})
         for i in ids:
-            self.store.log(gmail_id=i, sender=str(params.get("entry", "")), decision=entry.get("decision", ""),
+            self.log(gmail_id=i, sender=str(params.get("entry", "")), decision=entry.get("decision", ""),
                            rule=entry.get("rule", name).format(**params), dry_run=self.dry_run,
                            action="error" if i in failed else word, error=failed.get(i))
         if ids:
@@ -128,20 +133,20 @@ class Runner:
 
     async def classify_search(self, name: str, params: dict, pace: float = 0.3) -> dict:
         """Step 1 of a manual rules job (e.g. clean_label): classify every message its search finds into
-        data/cache/<job>_<params>.json. Nothing in Gmail changes. Can be interrupted and resumed."""
+        data/cache/<job>_<params>.json. Nothing in the mailbox changes. Can be interrupted and resumed."""
         import asyncio
         import time
 
         job = self.job(name)
-        out = self.data / "cache" / f"{name}_{'_'.join(str(v) for v in params.values() if isinstance(v, str))}.json"
-        ids = gmail.search(self.svc, job["search"].format(**params))[:params.get("limit") or None]   # newest first
+        out = self.cache(f"{name}_{'_'.join(str(v) for v in params.values() if isinstance(v, str))}.json")
+        ids = self.box.search(job["search"].format(**params))[:params.get("limit") or None]   # newest first
         done = json.loads(out.read_text()) if out.exists() else {}
         todo = [i for i in ids if i not in done or "error" in done[i]]   # earlier failures are tried again
         sem = asyncio.Semaphore(self.engine.config.settings["jev"].get("concurrency", 8))
         async with self.engine.jev.client() as client:
             for start in range(0, len(todo), 30):
                 emails = []
-                for i in todo[start:start + 30]:   # the Gmail client is used one call at a time
+                for i in todo[start:start + 30]:   # the mailbox is used one call at a time
                     emails.append(self.engine.parse(self.fetch(i)))
                     time.sleep(pace)
                 results = await asyncio.gather(*(self.engine.classify(client, e, self.lookups, sem) for e in emails),
@@ -159,20 +164,20 @@ class Runner:
         return {i: done[i] for i in ids if i in done}
 
     def fetch(self, msg_id: str) -> dict:
-        """gmail.get, waiting out the per-minute quota."""
+        """The message, waiting out the provider's per-minute quota."""
         import time
 
         for attempt in range(10):
             try:
-                return gmail.get(self.svc, msg_id)
-            except HttpError as e:
+                return self.box.get(msg_id)
+            except mailbox.ERRORS as e:
                 if e.status_code not in (403, 429) or attempt == 9:
                     raise
                 time.sleep(30)
         raise RuntimeError("unreachable")
 
     def apply_classified(self, name: str, params: dict, done: dict) -> dict:
-        """Step 2: perform the outcomes of a classified set, one Gmail call per distinct result. With the
+        """Step 2: perform the outcomes of a classified set, one call per distinct result in Gmail. With the
         `relabel` parameter the scanned label is taken off the mail the rules no longer give it to."""
         job = self.job(name)
         label, relabel = params.get("label"), params.get("relabel")
@@ -195,17 +200,17 @@ class Runner:
                 action = outcomes.action_name(decision, spec, list(names), acted) + (f" (-{label})" if drop else "")
                 if self.dry_run and acted:
                     action = f"dry-run:{action}"
-            except HttpError as e:
+            except mailbox.ERRORS as e:
                 action, error = "error", str(e)[:200]
             summary[action] = summary.get(action, 0) + len(ids)
             for i in ids:
                 r = done[i]
-                self.store.log(gmail_id=i, thread_id=r["thread"], sender=r["sender"], subject=r["subject"],
+                self.log(gmail_id=i, thread_id=r["thread"], sender=r["sender"], subject=r["subject"],
                                decision=decision, rule=f"retro:{label or name}: {r['rule']}", action=action,
                                dry_run=self.dry_run, error=error, tokens=r["tokens"], facts=r["facts"], jev=r["jev"])
                 if error is None and not self.dry_run:
                     r["applied"] = action
-        out = self.data / "cache" / f"{name}_{'_'.join(str(v) for v in params.values() if isinstance(v, str))}.json"
+        out = self.cache(f"{name}_{'_'.join(str(v) for v in params.values() if isinstance(v, str))}.json")
         stored = json.loads(out.read_text()) if out.exists() else {}
         stored.update(done)
         out.write_text(json.dumps(stored, ensure_ascii=False, default=str))
@@ -214,24 +219,14 @@ class Runner:
     # ------------------------------------------------------------ lists
 
     def label_senders(self, label: str) -> set[str]:
-        """Every sender address in a Gmail label (headers only, remembered per message)."""
-        M = self.svc.users().messages()
-        lid = self.labels.id(label)
-        ids, tok = [], None
-        while True:
-            res = gmail._execute(M.list(userId="me", labelIds=[lid], maxResults=500, includeSpamTrash=True,
-                                        pageToken=tok))
-            ids += [m["id"] for m in res.get("messages", [])]
-            tok = res.get("nextPageToken")
-            if not tok:
-                break
-        cache = self.data / "cache" / f"{label.lower()}_index.json"
+        """Every sender address in a label (headers only, remembered per message)."""
+        ids = self.box.in_label(label)
+        cache = self.cache(f"{label.lower()}_index.json")
         index = json.loads(cache.read_text()) if cache.exists() else {}
         for mid in ids:
             if mid not in index:
-                meta = gmail._execute(M.get(userId="me", id=mid, format="metadata", metadataHeaders=["From", "Subject"]))
-                h = {x["name"]: x["value"] for x in meta["payload"].get("headers", [])}
-                index[mid] = {"from": parseaddr(h.get("From", ""))[1].lower(), "subject": h.get("Subject", "")}
+                h = self.box.headers(mid)
+                index[mid] = {"from": parseaddr(h["from"])[1].lower(), "subject": h["subject"]}
         cache.parent.mkdir(parents=True, exist_ok=True)
         cache.write_text(json.dumps(index, indent=1, ensure_ascii=False))
         return {index[mid]["from"] for mid in ids if index[mid]["from"]}   # only mail in the label now
@@ -266,7 +261,7 @@ class Runner:
 
     def forget(self, label: str, ids: list[str]) -> None:
         """Drop messages from a label's sender index (they left the label, e.g. after an unblock)."""
-        cache = self.data / "cache" / f"{label.lower()}_index.json"
+        cache = self.cache(f"{label.lower()}_index.json")
         if cache.exists():
             index = json.loads(cache.read_text())
             for i in ids:

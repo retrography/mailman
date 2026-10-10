@@ -1,4 +1,4 @@
-"""SQLite log of every email the daemon handled, plus its checkpoint (DESIGN.md §3)."""
+"""SQLite log of every email the daemons handled (one per mailbox), plus their checkpoints (DESIGN.md §3)."""
 
 from __future__ import annotations
 
@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS actions (
     error       TEXT,
     tokens      INTEGER,
     facts       TEXT,                   -- JSON: the facts the rules saw
-    jev         TEXT                    -- JSON: Jev's answers
+    jev         TEXT,                   -- JSON: Jev's answers
+    account     TEXT NOT NULL DEFAULT 'gmail'   -- the mailbox it is in (gmail_id is its id there)
 );
 CREATE INDEX IF NOT EXISTS actions_gmail_id ON actions (gmail_id);
 CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT);
@@ -35,6 +36,11 @@ class Store:
         path.parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(path, check_same_thread=False)   # the web server calls from worker threads
         self.db.executescript(SCHEMA)
+        if "account" not in [c[1] for c in self.db.execute("PRAGMA table_info(actions)")]:   # a log from before 0.6
+            try:
+                self.db.execute("ALTER TABLE actions ADD COLUMN account TEXT NOT NULL DEFAULT 'gmail'")
+            except sqlite3.OperationalError:   # another process added it in the same moment
+                pass
 
     def get(self, key: str) -> str | None:
         row = self.db.execute("SELECT value FROM state WHERE key = ?", (key,)).fetchone()
@@ -56,19 +62,19 @@ class Store:
         return self.db.execute("SELECT 1 FROM actions WHERE gmail_id = ? AND dry_run = 0 AND error IS NULL",
                                (gmail_id,)).fetchone() is not None
 
-    def failed(self, days: int = 7) -> list[str]:
-        """Emails from the last `days` whose attempts all failed (no successful live or dry-run entry)."""
+    def failed(self, days: int = 7, account: str = "gmail") -> list[str]:
+        """Emails of a mailbox from the last `days` whose attempts all failed (no successful live or dry-run entry)."""
         return [r[0] for r in self.db.execute(
-            "SELECT gmail_id FROM actions WHERE ts >= datetime('now', ?) GROUP BY gmail_id "
-            "HAVING SUM(error IS NULL) = 0 ORDER BY MIN(id)", (f"-{days} days",))]
+            "SELECT gmail_id FROM actions WHERE ts >= datetime('now', ?) AND account = ? GROUP BY gmail_id "
+            "HAVING SUM(error IS NULL) = 0 ORDER BY MIN(id)", (f"-{days} days", account))]
 
     def log(self, *, gmail_id: str, thread_id: str = "", sender: str = "", subject: str = "", decision: str = "",
             rule: str = "", action: str = "", dry_run: bool, error: str | None = None, tokens: int = 0,
-            facts: dict | None = None, jev: dict | None = None) -> None:
+            facts: dict | None = None, jev: dict | None = None, account: str = "gmail") -> None:
         self.db.execute(
             "INSERT INTO actions (ts, gmail_id, thread_id, sender, subject, decision, rule, action, dry_run, "
-            "error, tokens, facts, jev) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "error, tokens, facts, jev, account) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (datetime.now(timezone.utc).isoformat(timespec="seconds"), gmail_id, thread_id, sender, subject,
              decision, rule, action, int(dry_run), error, tokens,
-             json.dumps(facts or {}, ensure_ascii=False, default=str), json.dumps(jev or {}, ensure_ascii=False)))
+             json.dumps(facts or {}, ensure_ascii=False, default=str), json.dumps(jev or {}, ensure_ascii=False), account))
         self.db.commit()

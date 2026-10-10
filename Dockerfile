@@ -32,7 +32,7 @@ COPY --from=build /app/defaults ./defaults
 ARG BUILD_VERSION=dev
 LABEL io.hass.version="${BUILD_VERSION}" io.hass.type="app" io.hass.arch="aarch64|amd64" \
       org.opencontainers.image.source="https://github.com/retrography/mailman" \
-      org.opencontainers.image.description="Mailman: sorts a Gmail mailbox by rules you can read and change"
+      org.opencontainers.image.description="Mailman: sorts a Gmail mailbox, and an Outlook one, by rules you can read and change"
 
 # Home Assistant mounts the app's storage and options as root-owned.
 USER 0

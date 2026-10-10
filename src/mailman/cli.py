@@ -6,7 +6,7 @@ import argparse
 import os
 from pathlib import Path
 
-from mailman import gmail
+from mailman import gmail, mailbox
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -17,6 +17,8 @@ def cmd_auth(args: argparse.Namespace) -> None:
     For the routine, copy client_id / client_secret / refresh_token from that file into the
     GMAIL_CLIENT_ID / GMAIL_CLIENT_SECRET / GMAIL_REFRESH_TOKEN secrets.
     """
+    if args.outlook:
+        return auth_outlook()
     from google_auth_oauthlib.flow import InstalledAppFlow
 
     flow = InstalledAppFlow.from_client_secrets_file(args.client_secrets, gmail.SCOPES)
@@ -28,14 +30,32 @@ def cmd_auth(args: argparse.Namespace) -> None:
     print(f"token written to {out}")
 
 
+def auth_outlook() -> None:
+    """Sign in to an Outlook mailbox: open Microsoft's page on any device and type the code shown here."""
+    import time
+
+    from mailman import outlook
+    from mailman.engine import daemon
+
+    daemon.load_env()
+    d = outlook.start_sign_in()
+    print(f"open {d['verification_uri']} and enter the code {d['user_code']}")
+    deadline = time.time() + int(d.get("expires_in", 900))
+    while time.time() < deadline:
+        time.sleep(int(d.get("interval", 5)))
+        if outlook.finish_sign_in(d["device_code"]):
+            return print(f"signed in; the sign-in is kept in {outlook.token_file()}")
+    raise SystemExit("the code expired before it was entered: run this again")
+
+
 def cmd_daemon(args: argparse.Namespace) -> None:
     from mailman.engine import daemon
 
-    daemon.main(dry_run=True if args.dry_run else None, poll=args.poll)
+    daemon.main(dry_run=True if args.dry_run else None, poll=args.poll, account=args.account)
 
 
-def runner(dry_run: bool = False):
-    """A job runner outside the daemon (manual jobs)."""
+def runner(dry_run: bool = False, account: str = "gmail"):
+    """A job runner on one mailbox, outside the daemon (manual jobs)."""
     import logging
 
     from mailman.engine import daemon
@@ -47,7 +67,9 @@ def runner(dry_run: bool = False):
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     for noisy in ("httpx", "httpx2", "typesafe_sdk", "googleapiclient.discovery_cache", "googleapiclient.http"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
-    return Runner(Engine(), gmail.service(), Store(daemon.data_dir() / "mailman.db"), daemon.data_dir(), dry_run)
+    engine = Engine()
+    return Runner(engine, mailbox.connect(account, engine.config.settings), Store(daemon.data_dir() / "mailman.db"),
+                  daemon.data_dir(), dry_run)
 
 
 def cmd_check(args: argparse.Namespace) -> None:
@@ -72,19 +94,21 @@ def cmd_check(args: argparse.Namespace) -> None:
 
 
 def cmd_sync(args: argparse.Namespace) -> None:
-    """Fill a list from its Gmail label, normalise it, and run its on_new_entry job."""
+    """Fill a list from its label in a mailbox, normalise it, and run its on_new_entry job."""
     import json
 
-    print(json.dumps(runner(args.dry_run).sync_list(args.list), indent=1))
+    print(json.dumps(runner(args.dry_run, args.account).sync_list(args.list), indent=1))
 
 
 def cmd_unblock(args: argparse.Namespace) -> None:
-    """Take entries off the blocked list; their mail leaves Blocked and goes back to the inbox."""
-    r = runner()
-    print(f"removed from list: {r.remove_entries('blocked', args.entries)}")
-    ids = [i for e in args.entries for i in r.run_search("unblock", {"entry": e.strip().lower()})]
-    r.forget("Blocked", ids)
-    print(f"{len(set(ids))} messages moved from Blocked back to the inbox")
+    """Take entries off the blocked list; their mail leaves Blocked and goes back to the inbox, in every mailbox."""
+    for n, account in enumerate(mailbox.connected() or ["gmail"]):
+        r = runner(account=account)
+        if n == 0:
+            print(f"removed from list: {r.remove_entries('blocked', args.entries)}")
+        ids = [i for e in args.entries for i in r.run_search("unblock", {"entry": e.strip().lower()})]
+        r.forget("Blocked", ids)
+        print(f"{r.box.title}: {len(set(ids))} messages moved from Blocked back to the inbox")
 
 
 def cmd_clean_label(args: argparse.Namespace) -> None:
@@ -92,7 +116,7 @@ def cmd_clean_label(args: argparse.Namespace) -> None:
     import asyncio
     from collections import Counter
 
-    r = runner()
+    r = runner(account=args.account)
     params = {"label": args.label, "relabel": args.relabel, "limit": args.limit}
     done = asyncio.run(r.classify_search("clean_label", params))
     todo = {i: x for i, x in done.items() if "error" not in x and not x.get("applied")}
@@ -135,19 +159,23 @@ def cmd_web(args: argparse.Namespace) -> None:
 def main() -> None:
     p = argparse.ArgumentParser(prog="mailman")
     sub = p.add_subparsers(required=True)
-    a = sub.add_parser("auth", help="one-time Gmail OAuth consent (local)")
+    a = sub.add_parser("auth", help="one-time sign-in from this machine (Gmail; --outlook for an Outlook mailbox)")
     a.add_argument("--client-secrets", default=str(ROOT / "attic/py/data/credentials.json"))
     a.add_argument("--out", default=str(ROOT / "data/cache/token.json"))
+    a.add_argument("--outlook", action="store_true", help="sign in to an Outlook mailbox instead (needs OUTLOOK_CLIENT_ID)")
     a.set_defaults(fn=cmd_auth)
-    d = sub.add_parser("daemon", help="watch the mailbox and run the triggers of config/jobs.yaml")
-    d.add_argument("--dry-run", action="store_true", help="log decisions without changing Gmail")
+    d = sub.add_parser("daemon", help="watch the mailboxes and run the triggers of config/jobs.yaml")
+    d.add_argument("--dry-run", action="store_true", help="log decisions without changing the mailbox")
+    d.add_argument("--account", choices=mailbox.ACCOUNTS, default=None,
+                   help="only this mailbox (default: every mailbox that has a sign-in, one process each)")
     d.add_argument("--poll", type=int, default=None, help="poll at least every N seconds (default: settings)")
     d.set_defaults(fn=cmd_daemon)
     c = sub.add_parser("check", help="load and summarise the configuration")
     c.set_defaults(fn=cmd_check)
-    s = sub.add_parser("sync", help="fill a list from its Gmail label (e.g. `mailman sync blocked`)")
+    s = sub.add_parser("sync", help="fill a list from its label (e.g. `mailman sync blocked`)")
     s.add_argument("list")
     s.add_argument("--dry-run", action="store_true")
+    s.add_argument("--account", choices=mailbox.ACCOUNTS, default="gmail", help="the mailbox to look in")
     s.set_defaults(fn=cmd_sync)
     u = sub.add_parser("unblock", help="take entries off the blocked list and move their mail back")
     u.add_argument("entries", nargs="+")
@@ -157,6 +185,7 @@ def main() -> None:
     k.add_argument("--apply", action="store_true", help="perform the outcomes (default: preview only)")
     k.add_argument("--relabel", action="store_true", help="take the label off mail the rules no longer give it to")
     k.add_argument("--limit", type=int, default=0, help="only the newest N messages of the label")
+    k.add_argument("--account", choices=mailbox.ACCOUNTS, default="gmail", help="the mailbox the label is in")
     k.set_defaults(fn=cmd_clean_label)
     x = sub.add_parser("export", help="configuration, log and test set as one file, to import in another installation")
     x.add_argument("out", nargs="?", default="mailman-export.zip")

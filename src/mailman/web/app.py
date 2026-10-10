@@ -20,7 +20,7 @@ from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from mailman import gmail
+from mailman import gmail, mailbox, outlook
 from mailman.engine import outcomes as eo
 from mailman.engine import validate
 from mailman.engine.config import FILES
@@ -64,11 +64,11 @@ def create() -> FastAPI:
     app.state.ws = ws
     hass.watch(ws.health)   # as a Home Assistant app: the alerts appear there too
 
-    def need_gmail():
-        svc = ws.svc()
-        if svc is None:
-            raise HTTPException(503, "Gmail is not connected")
-        return svc
+    def need_box(account: str | None = None):
+        box = ws.box(account)
+        if box is None:
+            raise HTTPException(503, f"{mailbox.TITLES.get(account, 'Gmail')} is not connected")
+        return box
 
     def file_name(name: str) -> str:
         if name not in FILES:
@@ -119,10 +119,9 @@ def create() -> FastAPI:
     def catalogue():
         e = ws.engine
         labels = []
-        if ws.svc():
+        if ws.box():
             try:
-                labels = sorted(l["name"] for l in gmail._execute(ws.svc().users().labels().list(userId="me"))["labels"]
-                                if l["type"] == "user")
+                labels = ws.box().labels()
             except Exception:
                 labels = []
         return {"facts": validate.catalogue(e),
@@ -159,18 +158,15 @@ def create() -> FastAPI:
 
     @app.get("/api/candidates")
     def candidates(q: str, limit: int = 300):
-        """Senders of the mail a Gmail search finds, with counts — to pick list entries from."""
-        svc = need_gmail()
-        res = gmail._execute(svc.users().messages().list(userId="me", q=q, maxResults=min(limit, 500)))
+        """Senders of the mail a search finds in the first mailbox, with counts — to pick list entries from."""
+        box = need_box()
         counts: Counter = Counter()
         example: dict[str, str] = {}
-        for m in res.get("messages", []):
-            meta = gmail._execute(svc.users().messages().get(userId="me", id=m["id"], format="metadata",
-                                                             metadataHeaders=["From", "Subject"]))
-            h = {x["name"]: x["value"] for x in meta["payload"].get("headers", [])}
-            a = parseaddr(h.get("From", ""))[1].lower()
+        for i in box.search(q, limit=min(limit, 500)):
+            h = box.headers(i)
+            a = parseaddr(h["from"])[1].lower()
             counts[a] += 1
-            example.setdefault(a, h.get("Subject", ""))
+            example.setdefault(a, h["subject"])
         return [{"address": a, "count": n, "example": example[a]} for a, n in counts.most_common()]
 
     # ------------------------------------------------------------ the log
@@ -185,14 +181,14 @@ def create() -> FastAPI:
 
     @app.post("/api/log/{row}/undo")
     def undo(row: int):
-        svc = need_gmail()
         d = ws.log_row(row)
+        box = need_box(d["account"])
         spec = ws.engine.config.outcomes.get(d["decision"])
         if not spec or "undo" not in spec:
             raise HTTPException(400, f"the outcome “{d['decision']}” has no undo")
         labels = [l for l in d["action"].split(" (")[0].split(" ", 1)[1].split(",")] if " " in d["action"] else []
-        eo.apply(svc, eo.Labels(svc), {"do": spec["undo"]}, labels, [d["gmail_id"]])
-        ws.store.log(gmail_id=d["gmail_id"], thread_id=d["thread_id"] or "", sender=d["sender"] or "",
+        eo.apply(box, {"do": spec["undo"]}, labels, [d["gmail_id"]])
+        ws.store.log(account=d["account"], gmail_id=d["gmail_id"], thread_id=d["thread_id"] or "", sender=d["sender"] or "",
                      subject=d["subject"] or "", decision="undo", rule=f"undo of #{row} ({d['rule']})",
                      action=f"undo {d['action']}", dry_run=False)
         return {"ok": True}
@@ -200,10 +196,10 @@ def create() -> FastAPI:
     @app.post("/api/log/{row}/feedback")
     def feedback(row: int, decision: str = Body(...), labels: list[str] = Body([]), note: str = Body("")):
         """“This was wrong”: the email joins the test set with the outcome you expected."""
-        svc = need_gmail()
         d = ws.log_row(row)
+        box = need_box(d["account"])
         (ws.data / "testset").mkdir(parents=True, exist_ok=True)
-        case = {"raw": gmail.get(svc, d["gmail_id"]), "jev": d["jev"],
+        case = {"raw": box.get(d["gmail_id"]), "jev": d["jev"],
                 "expected": {"decision": decision, "labels": labels}, "note": note, "from_log_row": row}
         (ws.data / "testset" / f"{d['gmail_id']}.json").write_text(json.dumps(case, ensure_ascii=False))
         ws.store.event("feedback", f"{d['sender']} · expected {decision} {','.join(labels)}")
@@ -289,25 +285,29 @@ def create() -> FastAPI:
 
     @app.post("/api/jobs/{name}/run")
     def run_job(name: str, params: dict = Body({}), dry_run: bool = Body(True)):
-        svc = need_gmail()
+        """A manual job, in every connected mailbox (the result is per mailbox when there are several)."""
+        need_box()
         job = ws.engine.config.jobs["jobs"].get(name)
         if not job:
             raise HTTPException(404, "no such job")
-        runner = Runner(ws.engine, svc, ws.store, ws.data, dry_run)
-        if "sync_list" in job:
-            result = runner.sync_list(job["sync_list"])
-        elif "search" in job and "outcome" in job:
-            job_enabled = job.get("enabled", True)
-            ids = gmail.search(svc, job["search"].format(**params)) if dry_run or not job_enabled else \
-                runner.run_search(name, params)
-            result = {"messages": len(ids), "search": job["search"].format(**params), "outcome": job["outcome"],
-                      "note": "" if job_enabled else "this job is disabled in jobs.yaml"}
-        else:
-            raise HTTPException(400, "this job runs from the command line (mailman clean-label) or a trigger")
+        results = {}
+        for box in ws.boxes():
+            runner = Runner(ws.engine, box, ws.store, ws.data, dry_run)
+            if "sync_list" in job:
+                result = runner.sync_list(job["sync_list"])
+            elif "search" in job and "outcome" in job:
+                job_enabled = job.get("enabled", True)
+                ids = box.search(job["search"].format(**params)) if dry_run or not job_enabled else \
+                    runner.run_search(name, params)
+                result = {"messages": len(ids), "search": job["search"].format(**params), "outcome": job["outcome"],
+                          "note": "" if job_enabled else "this job is disabled in jobs.yaml"}
+            else:
+                raise HTTPException(400, "this job runs from the command line (mailman clean-label) or a trigger")
+            results[box.title] = result
         if not dry_run:
             ws.store.event("job_run", f"{name} {json.dumps(params)}")
             ws.reload()
-        return {"dry_run": dry_run, "result": result}
+        return {"dry_run": dry_run, "result": results if len(results) > 1 else next(iter(results.values()))}
 
     # ------------------------------------------------------------ clean-up of a label
 
@@ -315,7 +315,8 @@ def create() -> FastAPI:
     REMOVES = ("delete", "spam", "block", "block_everywhere")
 
     def cleanup_file(label: str) -> Path:
-        return ws.data / "cache" / f"clean_label_{label}.json"
+        account = ws.box().name if ws.box() else "gmail"
+        return ws.data / "cache" / (f"clean_label_{label}.json" if account == "gmail" else f"{account}_clean_label_{label}.json")
 
     def cleanup_records(label: str) -> dict:
         path = cleanup_file(label)
@@ -344,8 +345,9 @@ def create() -> FastAPI:
 
     @app.post("/api/cleanup/{label}/start")
     def cleanup_start(label: str, limit: int | None = Body(None), fresh: bool = Body(False)):
-        """Classify the mail in a label with the current rules, in the background. Nothing in Gmail changes."""
-        need_gmail()
+        """Classify the mail in a label of the first mailbox with the current rules, in the background. Nothing
+        in the mailbox changes."""
+        account = need_box().name
         cleanup_idle(label)
         if fresh and cleanup_file(label).exists():
             cleanup_file(label).unlink()
@@ -353,9 +355,9 @@ def create() -> FastAPI:
 
         def work() -> None:
             try:
-                svc = gmail.service()   # its own connection and database handle: this is another thread
-                state["total"] = len(gmail.search(svc, f"label:{label}")[:limit or None])
-                runner = Runner(ws.engine, svc, Store(ws.data / "mailman.db"), ws.data, dry_run=False)
+                box = mailbox.connect(account, ws.engine.config.settings)   # its own connection and database handle: this is another thread
+                state["total"] = len(box.search(f"label:{label}")[:limit or None])
+                runner = Runner(ws.engine, box, Store(ws.data / "mailman.db"), ws.data, dry_run=False)
                 asyncio.run(runner.classify_search("clean_label", {"label": label, "limit": limit}))
             except Exception as e:
                 state["error"] = str(e)[:300]
@@ -381,9 +383,9 @@ def create() -> FastAPI:
     @app.post("/api/cleanup/{label}/apply")
     def cleanup_apply(label: str, relabel: bool = Body(True, embed=True)):
         """Do it: move, relabel and trash as previewed. Every change is logged and can be undone from Logs."""
-        svc = need_gmail()
+        box = need_box()
         cleanup_idle(label)
-        runner = Runner(ws.engine, svc, ws.store, ws.data, dry_run=False)
+        runner = Runner(ws.engine, box, ws.store, ws.data, dry_run=False)
         summary = runner.apply_classified("clean_label", {"label": label, "relabel": relabel}, cleanup_records(label))
         ws.store.event("job_run", f"clean_label {label}: {json.dumps(summary, ensure_ascii=False)}")
         return {"summary": summary, **cleanup_status(label)}
@@ -398,17 +400,21 @@ def create() -> FastAPI:
 
     @app.get("/api/credentials")
     def credentials():
-        gmail_ok, detail = False, ""
-        try:
-            profile = gmail._execute(gmail.service().users().getProfile(userId="me"))
-            gmail_ok, detail = True, profile.get("emailAddress", "")
-        except Exception as e:
-            detail = str(e)[:200]
+        def state(account: str) -> tuple[bool, str]:
+            try:
+                return True, mailbox.connect(account, ws.engine.config.settings).address()
+            except Exception as e:
+                return False, str(e)[:200]
+
+        (gmail_ok, detail), signed = state("gmail"), mailbox.signed_in("outlook") is not None
+        outlook_ok, outlook_detail = state("outlook") if signed else (False, "no sign-in has been stored yet")
         return {"gmail": {"connected": gmail_ok, "detail": detail, "token_file": str(token_path()),
                           "client_secrets_present": secrets_path().exists() or bool(
                               os.environ.get("GMAIL_CLIENT_ID") and os.environ.get("GMAIL_CLIENT_SECRET")),
                           "fixed_token": bool(os.environ.get("GMAIL_REFRESH_TOKEN")),
                           "client_secrets_file": str(secrets_path())},
+                "outlook": {"connected": outlook_ok, "detail": outlook_detail, "signed_in": signed,
+                            "client_id_present": bool(outlook.client_id())},
                 "typesafe": {"key_present": bool(os.environ.get("TYPESAFE_API_KEY"))},
                 "can_import": bool(os.environ.get("MAILMAN_IMPORT"))}
 
@@ -432,7 +438,7 @@ def create() -> FastAPI:
         path.write_text(flow.credentials.to_json())
         os.chmod(path, 0o600)
         os.environ["MAILMAN_TOKEN_FILE"] = str(path)
-        ws._svc = None
+        ws.forget("gmail")
         ws.store.event("gmail_connected", "token stored")
 
     @app.post("/api/oauth/link")
@@ -478,10 +484,39 @@ def create() -> FastAPI:
         return HTMLResponse("<p>Gmail is connected. You can close this tab and return to mailman.</p>"
                             "<script>setTimeout(()=>location.href='../../#/health',1200)</script>")
 
+    @app.post("/api/outlook/link")
+    def outlook_link():
+        """Outlook sign-in, step 1: Microsoft's page and the short code to type there (on any device)."""
+        try:
+            d = outlook.start_sign_in()
+        except Exception as e:
+            raise HTTPException(400, str(e)[:300])
+        app.state.outlook_code = d["device_code"]
+        return {"url": d["verification_uri"], "code": d["user_code"], "interval": int(d.get("interval", 5)),
+                "expires_in": int(d.get("expires_in", 900))}
+
+    @app.post("/api/outlook/finish")
+    def outlook_finish():
+        """Step 2, asked by the page every few seconds: has the code been entered and the access approved?"""
+        code = getattr(app.state, "outlook_code", None)
+        if code is None:
+            raise HTTPException(400, "no sign-in in progress: get a code first")
+        try:
+            done = outlook.finish_sign_in(code)
+        except Exception as e:
+            app.state.outlook_code = None
+            raise HTTPException(400, str(e)[:300])
+        if not done:
+            return {"pending": True}
+        app.state.outlook_code = None
+        ws.forget("outlook")
+        ws.store.event("outlook_connected", "sign-in stored")
+        return {"pending": False, **credentials()}
+
     @app.get("/api/export")
     def export_bundle(everything: bool = False):
         """Download this installation as one file: the configuration, or with `everything` also the log and the
-        test set. Never the Gmail sign-in."""
+        test set. Never a mailbox sign-in."""
         import tempfile
         import time as _time
 

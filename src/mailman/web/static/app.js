@@ -390,7 +390,7 @@ async function logDetail(row) {
   body.append(h('h2', {}, d.subject || '(no subject)'),
     h('dl', { class: 'kv' }, h('dt', {}, 'From'), h('dd', {}, d.sender), h('dt', {}, 'When'), h('dd', {}, fmtTime(d.ts)),
       h('dt', {}, 'Outcome'), h('dd', {}, badge(d.decision || '—'), ' ', d.dry_run ? badge('dry run', 'jev') : ''),
-      h('dt', {}, 'Rule'), h('dd', {}, d.rule || 'no rule matched'), h('dt', {}, 'Done in Gmail'), h('dd', {}, d.action),
+      h('dt', {}, 'Rule'), h('dd', {}, d.rule || 'no rule matched'), h('dt', {}, `Done in ${d.mailbox}`), h('dd', {}, d.action),
       d.error ? [h('dt', {}, 'Error'), h('dd', {}, d.error)] : null, h('dt', {}, 'Classifier tokens'), h('dd', {}, d.tokens || 0)));
   if (d.rules.length) {
     body.append(h('h3', {}, 'Why — the rule(s) as they are defined now'));
@@ -421,8 +421,8 @@ async function logDetail(row) {
   body.append(fb, h('div', { class: 'foot' },
     h('button', { onclick: () => { fb.hidden = !fb.hidden; } }, 'This was wrong…'),
     h('button', { disabled: !spec || d.dry_run || d.decision === 'keep' && !d.action.startsWith('label'), onclick: wrap(async () => {
-      await api('POST', `api/log/${row}/undo`); toast('undone in Gmail'); closeModal(); viewLog();
-    }) }, 'Undo in Gmail'),
+      await api('POST', `api/log/${row}/undo`); toast(`undone in ${d.mailbox}`); closeModal(); viewLog();
+    }) }, `Undo in ${d.mailbox}`),
     h('button', { class: 'primary', onclick: closeModal }, 'Close')));
   modal(body, true);
 }
@@ -1142,15 +1142,20 @@ async function viewHealth() {
   const [hl, cr] = await Promise.all([api('GET', 'api/health'), api('GET', 'api/credentials')]);
   const line = (ok, title, text, extra) => h('div', { class: 'panel row' }, h('span', { class: 'dot ' + (ok === null ? 'warn' : ok ? 'ok' : 'bad') }), h('b', { style: 'width:150px' }, title), h('span', { class: 'grow' }, text), extra);
   el.append(
-    line(hl.daemon_seconds_since_heartbeat === null ? null : hl.daemon_running, 'Daemon',
-      hl.daemon_seconds_since_heartbeat === null ? 'no heartbeat recorded yet (a daemon started before this version does not write one)'
-        : hl.daemon_running ? `running — last sign of life ${Math.round(hl.daemon_seconds_since_heartbeat / 60)} min ago` : `no sign of life for ${Math.round(hl.daemon_seconds_since_heartbeat / 60)} min`),
+    ...hl.daemons.map(dm => { const age = dm.seconds_since_heartbeat; return line(age === null ? null : dm.running, hl.daemons.length > 1 ? `Daemon, ${dm.mailbox}` : 'Daemon',
+      age === null ? 'no heartbeat recorded yet (it has not run here)'
+        : dm.running ? `running — last sign of life ${Math.round(age / 60)} min ago` : `no sign of life for ${Math.round(age / 60)} min`); }),
     line(true, 'Last email', hl.last_email ? `${fmtTime(hl.last_email.ts)} · ${hl.last_email.sender} · ${hl.last_email.action}` : 'none yet'),
     line(hl.errors_last_day === 0, 'Errors, last day', String(hl.errors_last_day)),
     line(hl.config_problems.length === 0, 'Configuration', hl.config_problems.length ? hl.config_problems.join(' · ') : 'consistent'),
     line(hl.test_emails > 0, 'Test set', `${hl.test_emails} emails`),
     line(cr.gmail.connected, 'Gmail', cr.gmail.connected ? `connected as ${cr.gmail.detail}` : `not connected — ${cr.gmail.detail}`,
       cr.gmail.fixed_token ? h('span', { class: 'muted' }, 'sign-in set in the options') : h('button', { onclick: () => connectGmail() }, cr.gmail.connected ? 'Reconnect' : 'Connect Gmail')),
+    line(cr.outlook.connected ? true : cr.outlook.signed_in ? false : null, 'Outlook',
+      cr.outlook.connected ? `connected as ${cr.outlook.detail}` : cr.outlook.signed_in ? `not connected — ${cr.outlook.detail}`
+        : cr.outlook.client_id_present ? 'not connected — optional: a second mailbox, sorted by the same rules'
+        : 'optional: a second mailbox. To add one, set your Microsoft client ID in the options first.',
+      cr.outlook.client_id_present ? h('button', { onclick: wrap(connectOutlook) }, cr.outlook.connected ? 'Reconnect' : 'Connect Outlook') : null),
     line(cr.typesafe.key_present, 'Classifier (TypeSafe Jev)', cr.typesafe.key_present ? 'API key present' : 'TYPESAFE_API_KEY is not set'));
   if (!cr.gmail.client_secrets_present) el.append(h('div', { class: 'banner warn' }, `“Connect Gmail” needs your Google OAuth client: its client id and secret in the options, or the client file at ${cr.gmail.client_secrets_file}.`));
   el.append(h('h2', {}, 'Recent changes'), h('div', { class: 'tablewrap' }, h('table', {}, h('tbody', {},
@@ -1178,19 +1183,48 @@ function connectGmail() {
   document.body.append(d); d.showModal();
 }
 
+// Outlook sign-in: a short code typed on Microsoft's page, on any device. This page asks until it is approved.
+async function connectOutlook() {
+  const r = await api('POST', 'api/outlook/link');
+  let open = true;
+  const note = h('div', { class: 'muted', style: 'margin-top:10px' }, 'Waiting for you to enter the code…');
+  const done = () => { open = false; d.close(); d.remove(); };
+  const d = h('dialog', { class: 'ask', style: 'max-width:620px' },
+    h('h3', { style: 'margin-top:0' }, 'Connect Outlook'),
+    h('p', {}, h('b', {}, '1. '), 'Open Microsoft’s sign-in page (on this or any other device):'),
+    h('a', { class: 'btn primary', href: r.url, target: '_blank', rel: 'noopener' }, 'Open Microsoft sign-in'),
+    h('p', {}, h('b', {}, '2. '), 'Enter this code there, sign in to the mailbox, and approve the access:'),
+    h('pre', { style: 'font-size:22px;letter-spacing:3px;text-align:center' }, r.code), note,
+    h('div', { class: 'row', style: 'justify-content:flex-end;gap:8px;margin-top:14px' }, h('button', { onclick: done }, 'Cancel')));
+  d.addEventListener('cancel', e => { e.preventDefault(); done(); });
+  document.body.append(d); d.showModal();
+  const until = Date.now() + r.expires_in * 1000;
+  while (open && Date.now() < until) {
+    await new Promise(ok => setTimeout(ok, r.interval * 1000));
+    if (!open) return;
+    try {
+      const s = await api('POST', 'api/outlook/finish');
+      if (s.pending) continue;
+      done(); toast(s.outlook.connected ? 'Outlook is connected as ' + s.outlook.detail : 'Stored, but Outlook still refuses: ' + s.outlook.detail); route();
+      return;
+    } catch (e) { note.replaceChildren(h('div', { class: 'banner bad' }, e.message || String(e))); return; }
+  }
+  if (open) note.replaceChildren(h('div', { class: 'banner bad' }, 'The code has expired. Close this and try again.'));
+}
+
 // ---------------------------------------------------------------- Backup
 
 async function viewBackup() {
   const el = main();
   const cr = await api('GET', 'api/credentials');
-  el.replaceChildren(h('h1', {}, 'Backup'), h('p', { class: 'lead' }, 'Take this installation with you, or bring one in. A bundle is one zip file; it never contains the Gmail sign-in.'));
+  el.replaceChildren(h('h1', {}, 'Backup'), h('p', { class: 'lead' }, 'Take this installation with you, or bring one in. A bundle is one zip file; it never contains a mailbox sign-in.'));
   el.append(h('h2', {}, 'Export'), h('div', { class: 'panel' },
     h('p', { class: 'muted', style: 'margin-top:0' }, 'The configuration is everything mailman needs to sort mail: profile, lists, flags, questions, rules. The full bundle adds the log (history and undo) and the test set (stored emails that “Check and save” runs on); it contains personal mail.'),
     h('div', { class: 'row' }, h('a', { class: 'btn primary', href: 'api/export', download: '' }, 'Download the configuration'),
       h('a', { class: 'btn', href: 'api/export?everything=true', download: '' }, 'Download everything'))));
   const file = h('input', { type: 'file', accept: '.zip' });
   el.append(h('h2', {}, 'Import'), h('div', { class: 'panel' },
-    h('p', { class: 'muted', style: 'margin-top:0' }, 'Replaces the configuration here with the bundle’s, and the log and test set too if the bundle has them. The Gmail sign-in is kept. The app restarts.'),
+    h('p', { class: 'muted', style: 'margin-top:0' }, 'Replaces the configuration here with the bundle’s, and the log and test set too if the bundle has them. The mailbox sign-ins are kept. The app restarts.'),
     cr.can_import ? h('div', { class: 'row' }, file, h('button', { class: 'danger', onclick: wrap(async () => {
       if (!file.files[0]) return;
       if (!(await ask('Replace the configuration of this installation with the bundle?'))) return;
