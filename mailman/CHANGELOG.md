@@ -3,6 +3,11 @@
 All notable changes to Mailman. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) as described in the README.
 
+## [0.7.1] - 2026-10-10
+
+### Added
+- Logs: a Mailbox column says which mailbox (Gmail or Outlook) each email was handled in.
+
 ## [0.7.0] - 2026-10-10
 
 ### Added

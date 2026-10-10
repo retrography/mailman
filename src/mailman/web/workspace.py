@@ -378,7 +378,10 @@ class Workspace:
         rows = db.execute("SELECT id, ts, gmail_id, sender, subject, decision, rule, action, dry_run, error, account" +
                           sql + " ORDER BY id DESC LIMIT ? OFFSET ?", [*args, limit, offset]).fetchall()
         keys = ("row", "ts", "gmail_id", "sender", "subject", "decision", "rule", "action", "dry_run", "error", "account")
-        return {"total": total, "rows": [dict(zip(keys, r)) for r in rows]}
+        rows = [dict(zip(keys, r)) for r in rows]
+        for r in rows:
+            r["mailbox"] = mailbox.TITLES.get(r["account"], r["account"])
+        return {"total": total, "rows": rows}
 
     def log_row(self, row: int) -> dict:
         db = sqlite3.connect(self.data / "mailman.db")
