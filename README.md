@@ -2,7 +2,8 @@
 
 # Mailman
 
-Sorts the mail arriving in a Gmail mailbox by rules you can read and change. A classifier (TypeSafe Jev)
+Sorts the mail arriving in a Gmail mailbox, and optionally an Outlook one, by rules you can read and change. A
+classifier (TypeSafe Jev)
 answers plain questions about each email; rules written in YAML combine those answers with observations
 about the email (sender lists, addresses, writing system, your own mailbox history) and decide: keep, label,
 file out of the inbox, trash, block. A web interface shows every decision with its reasons and tests each
@@ -16,6 +17,7 @@ It runs as a [Home Assistant](https://www.home-assistant.io) app, or as a plain 
 2. Install **Mailman** and follow its Documentation tab ([mailman/DOCS.md](mailman/DOCS.md)).
 
 You need a TypeSafe API key and your own Google OAuth client (type "Desktop app", published "In production").
+For an Outlook mailbox as well, your own Microsoft app registration (see the Documentation tab).
 
 ## Run it yourself
 
@@ -27,8 +29,11 @@ MAILMAN_TOKEN_FILE=data/token.json TYPESAFE_API_KEY=… uv run mailman daemon
 MAILMAN_TOKEN_FILE=data/token.json TYPESAFE_API_KEY=… uv run mailman web     # http://127.0.0.1:8377
 ```
 
+An Outlook mailbox as well: `OUTLOOK_CLIENT_ID=… uv run mailman auth --outlook` (it shows a code to type on
+Microsoft's page). `mailman daemon` then runs one process per mailbox; `--account outlook` runs just that one.
+
 As a container: build the `Dockerfile` and mount a folder at `/config`; set `TYPESAFE_API_KEY`,
-`GMAIL_CLIENT_ID` and `GMAIL_CLIENT_SECRET`.
+`GMAIL_CLIENT_ID` and `GMAIL_CLIENT_SECRET` (and `OUTLOOK_CLIENT_ID` for an Outlook mailbox).
 
 ## Layout
 

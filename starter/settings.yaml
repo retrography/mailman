@@ -4,6 +4,9 @@ mailbox: '{{identity.emails.0}}'
 dry_run: false
 poll_seconds: 300
 idle_renew_seconds: 540
+outlook:                         # only for an Outlook mailbox
+  poll_seconds: 60               # new mail is asked for this often (Gmail's arrives at once)
+  archive_folder: archive        # where `file` (INBOX taken off) moves mail
 retry_failed_days: 7
 jev:
   model: jev-latest

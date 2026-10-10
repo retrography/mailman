@@ -11,3 +11,9 @@ configuration:
   gmail_refresh_token:
     name: Gmail refresh token (optional)
     description: Leave empty to sign in from Mailman itself (Health, Connect Gmail). Fill it in only if you want to paste a token you made elsewhere.
+  outlook_client_id:
+    name: Microsoft client ID (optional)
+    description: Only for an Outlook mailbox as well. The Application (client) ID of your own Microsoft app registration (allow public client flows and personal accounts). Then Health, Connect Outlook.
+  outlook_tenant:
+    name: Microsoft tenant (optional)
+    description: Leave empty for an Outlook.com mailbox. For a work or school mailbox, your organisation's tenant ID or domain.

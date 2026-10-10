@@ -1,4 +1,4 @@
-"""An installation as one file: the configuration, and optionally the log and the test set. Never the Gmail
+"""An installation as one file: the configuration, and optionally the log and the test set. Never a mailbox
 sign-in. Made by `mailman export` or the interface's Backup page; unpacked by the app at start (mailman.ha)."""
 
 from __future__ import annotations

@@ -537,7 +537,7 @@ wheels = [
 
 [[package]]
 name = "mailman"
-version = "0.6.0"
+version = "0.7.0"
 source = { editable = "." }
 dependencies = [
     { name = "beautifulsoup4" },
@@ -550,6 +550,7 @@ dependencies = [
     { name = "phonenumbers" },
     { name = "pycountry" },
     { name = "pyyaml" },
+    { name = "requests" },
     { name = "typesafe-sdk" },
     { name = "uvicorn" },
 ]
@@ -566,6 +567,7 @@ requires-dist = [
     { name = "phonenumbers", specifier = ">=9.0.40" },
     { name = "pycountry", specifier = ">=26.2.16" },
     { name = "pyyaml" },
+    { name = "requests" },
     { name = "typesafe-sdk" },
     { name = "uvicorn", specifier = ">=0.54.0" },
 ]
