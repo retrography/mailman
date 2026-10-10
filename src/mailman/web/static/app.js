@@ -351,9 +351,10 @@ async function viewLog() {
     const r = await api('GET', 'api/log?' + p);
     count.textContent = `${r.total.toLocaleString()} entries` + (r.total > 200 ? ` · showing ${logState.offset + 1}–${logState.offset + r.rows.length}` : '');
     table.replaceChildren(h('table', {},
-      h('thead', {}, h('tr', {}, ['When', 'From', 'Subject', 'Outcome', 'Rule', 'Done'].map(t => h('th', {}, t)))),
+      h('thead', {}, h('tr', {}, ['When', 'Mailbox', 'From', 'Subject', 'Outcome', 'Rule', 'Done'].map(t => h('th', {}, t)))),
       h('tbody', {}, r.rows.map(x => h('tr', { class: 'click', onclick: () => logDetail(x.row) },
-        h('td', { style: 'white-space:nowrap' }, fmtTime(x.ts)), h('td', { class: 'clip', style: 'width:20%' }, x.sender),
+        h('td', { style: 'white-space:nowrap' }, fmtTime(x.ts)), h('td', { style: 'white-space:nowrap' }, x.mailbox),
+        h('td', { class: 'clip', style: 'width:20%' }, x.sender),
         h('td', { class: 'clip', style: 'width:32%' }, x.subject), h('td', {}, x.decision ? badge(x.decision) : ''),
         h('td', { class: 'clip', style: 'width:18%' }, x.rule), h('td', {}, x.error ? badge('error') : (x.dry_run ? badge(x.action, 'jev') : x.action)))))));
   });
