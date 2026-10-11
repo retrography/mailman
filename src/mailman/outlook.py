@@ -1,12 +1,15 @@
 """Outlook.com (or Microsoft 365) access through Microsoft Graph, in Gmail's terms (see mailman.mailbox).
 
-  a label              a category: flat names, several per message
-  INBOX                the Inbox folder; taking INBOX off a message there moves it to Archive
-  TRASH · SPAM         the Deleted Items and Junk Email folders
+  a label              a folder of that name, made when first needed (Travel/2026: a subfolder). A message is in one
+                       folder: it goes to the folder of the label it was given first. Every label mailman gives is
+                       also kept on the message out of sight (a property no mail client shows), so a search still
+                       finds it where the folder does not say: kept in the inbox, or moved to Deleted Items
+  INBOX                the Inbox folder; taking INBOX off a message there files it (without a label: Archive)
+  TRASH · SPAM         the Deleted Items and Junk Email folders; taking them off brings mail back where it was
   UNREAD · STARRED     the read state and the follow-up flag
   a search             Gmail's words from: label: in: older_than: newer_than: and their negations; nothing else
   new mail             asked for every `outlook.poll_seconds` (Graph cannot push to a server without a public address)
-  a label you add      noticed on mail in the inbox
+  a label you add      mail you move into that label's folder, from wherever (the folder is made for you)
 
 Sign-in is the device-code flow: you open Microsoft's page on any device and type a short code. It needs your
 own app registration (a public client that allows personal accounts): OUTLOOK_CLIENT_ID, and OUTLOOK_TENANT if
@@ -36,9 +39,16 @@ LOGIN = "https://login.microsoftonline.com"
 GRAPH = "https://graph.microsoft.com/v1.0"
 SCOPES = "offline_access User.Read Mail.ReadWrite"
 FOLDERS = {"INBOX": "inbox", "TRASH": "deleteditems", "SPAM": "junkemail"}
-OTHER = {"UNREAD", "STARRED", "IMPORTANT", "user_labels"}   # label words that are not categories
-ONE = "id,conversationId,parentFolderId,categories,isRead,flag,bodyPreview,receivedDateTime"
-FOUND = "id,from,subject,categories,parentFolderId,receivedDateTime"
+OTHER = {"UNREAD", "STARRED", "IMPORTANT", "user_labels"}   # label words that are not folders
+SYSTEM = ("inbox", "archive", "deleteditems", "junkemail", "drafts", "sentitems", "outbox")   # never a label
+# mailman's own notes on a message, which no mail client shows: the labels it gave (";Kids;Blocked;"), and the
+# folder the message was in before it went to Deleted Items or Junk Email
+LABELS = "String {5c8f6a4e-2d3b-4f7a-9e61-0b8d4c2a7f13} Name MailmanLabels"
+CAME_FROM = "String {5c8f6a4e-2d3b-4f7a-9e61-0b8d4c2a7f13} Name MailmanFrom"
+NOTES = f"singleValueExtendedProperties($filter=id eq '{LABELS}' or id eq '{CAME_FROM}')"
+ONE = "id,conversationId,parentFolderId,isRead,flag,bodyPreview,receivedDateTime"
+FOUND = "id,from,subject,parentFolderId,receivedDateTime"
+CREATED = {"changeType": "created", "$select": "id"}
 
 
 class GraphError(Exception):
@@ -211,6 +221,13 @@ def same_label(a: str, b: str) -> bool:
     return a.lower().replace("-", " ") == b.lower().replace("-", " ")
 
 
+def notes(m: dict) -> tuple[list[str], str | None]:
+    """(the labels mailman gave a message, the folder it was in before Trash or Junk)."""
+    found = {ep["id"].rsplit(" ", 1)[-1].lower(): ep.get("value") or ""
+             for ep in m.get("singleValueExtendedProperties") or []}
+    return [l for l in found.get("mailmanlabels", "").split(";") if l], found.get("mailmanfrom") or None
+
+
 # ------------------------------------------------------------ the mailbox
 
 class OutlookBox:
@@ -222,7 +239,10 @@ class OutlookBox:
         self.archive = s.get("archive_folder", "archive")
         self.g = Graph()
         self.folders: dict[str, str] = {}   # folder ids by well-known name
-        self.noticed: set[str] = set()      # inbox mail whose watched label was already reported
+        self.paths: dict[str, str] = {}     # label folders: path ("Kids", "Travel/2026") → id
+        self.names: dict[str, str] = {}     # and back: id → path
+        self.system: set[str] = set()       # ids of the system folders
+        self.scanned = 0.0                  # when the folders were last read (0: not yet)
 
     def folder_id(self, name: str) -> str:
         if name not in self.folders:
@@ -236,20 +256,70 @@ class OutlookBox:
     def label_id(self, name: str) -> str:
         return name
 
+    # ------------------------------------------------------------ label folders
+
+    def _scan(self) -> None:
+        """Every folder of yours, by path. A folder inside a system folder (Inbox/Kids) is the label Kids."""
+        for name in SYSTEM:
+            try:
+                self.system.add(self.folder_id(name))
+            except GraphError:   # this mailbox has no such folder
+                pass
+        system, self.paths, self.names = self.system, {}, {}
+
+        def walk(url: str, prefix: str) -> None:
+            for f in self.g.pages(url, {"$select": "id,displayName,childFolderCount", "$top": 250}):
+                path = "" if f["id"] in system else prefix + f["displayName"]
+                if path and path not in self.paths:
+                    self.paths[path], self.names[f["id"]] = f["id"], path
+                if f.get("childFolderCount"):
+                    walk(f"/me/mailFolders/{f['id']}/childFolders", path + "/" if path else "")
+
+        walk("/me/mailFolders", "")
+        self.scanned = time.time()
+
     def labels(self) -> list[str]:
-        return []   # the list of categories is a mailbox setting, which this sign-in does not ask to read
+        self._scan()
+        return sorted(self.paths)
+
+    def label_folder(self, label: str, create: bool = False) -> str | None:
+        """The folder of a label (made, with the folders above it, when `create`)."""
+        if not self.scanned:
+            self._scan()
+        found = self.paths.get(label) or next((i for p, i in self.paths.items() if same_label(p, label)), None)
+        if found or not create:
+            return found
+        parent = None
+        parts = label.split("/")
+        for n in range(1, len(parts) + 1):
+            path = "/".join(parts[:n])
+            if path not in self.paths:
+                url = "/me/mailFolders" if parent is None else f"/me/mailFolders/{parent}/childFolders"
+                made = self.g.call("POST", url, body={"displayName": parts[n - 1]})["id"]
+                self.paths[path], self.names[made] = made, path
+            parent = self.paths[path]
+        return parent
+
+    def label_of(self, folder: str | None) -> str | None:
+        """The label a folder stands for (None: a system folder). A folder not seen before (you made it since)
+        has the folders read again, at most every ten minutes."""
+        if folder and folder not in self.names and folder not in self.system and time.time() - self.scanned > 600:
+            self._scan()
+        return self.names.get(folder or "")
 
     def _labels(self, m: dict) -> list[str]:
-        out = [label for label, folder in FOLDERS.items() if m.get("parentFolderId") == self.folder_id(folder)]
+        here = m.get("parentFolderId")
+        out = [label for label, folder in FOLDERS.items() if here == self.folder_id(folder)]
         if m.get("isRead") is False:
             out.append("UNREAD")
         if (m.get("flag") or {}).get("flagStatus") == "flagged":
             out.append("STARRED")
-        return out + list(m.get("categories") or [])
+        folder = self.label_of(here)
+        return out + ([folder] if folder else []) + [l for l in notes(m)[0] if l != folder]
 
     def get(self, msg_id: str) -> dict:
         path = f"/me/messages/{quote(msg_id, safe='')}"
-        m = self.g.call("GET", path, params={"$select": ONE})
+        m = self.g.call("GET", path, params={"$select": ONE, "$expand": NOTES})
         mime = self.g.send("GET", path + "/$value").content
         received = datetime.fromisoformat(m["receivedDateTime"]) if m.get("receivedDateTime") else None
         return {"id": m["id"], "threadId": m.get("conversationId") or "", "labelIds": self._labels(m),
@@ -273,17 +343,24 @@ class OutlookBox:
         first = lambda word: next((v for neg, k, v in terms if k == word and not neg), None)
         sender, label, place = first("from"), first("label"), first("in")
         url = f"/me/mailFolders/{FOLDERS[place.upper()]}/messages" if place in ("inbox", "trash", "spam") else "/me/messages"
-        params = {"$select": FOUND, "$top": 100}
+        params = {"$select": FOUND, "$expand": NOTES, "$top": 100}
+        sources = [(url, params)]
         if sender:
             params["$search"] = f'"from:{sender}"'
-        elif label:
-            params["$filter"] = "categories/any(c:c eq '%s')" % label.replace("'", "''")
+        elif label:   # in the label's folder, or labelled by mailman wherever it is now
+            mark = ";%s;" % label.replace("'", "''")
+            sources = [(f"/me/mailFolders/{folder}/messages", dict(params))] if (folder := self.label_folder(label)) else []
+            sources.append(("/me/messages", {**params, "$filter": "singleValueExtendedProperties/Any(ep: ep/id eq "
+                                                                   f"'{LABELS}' and contains(ep/value, '{mark}'))"}))
         everywhere = include_trash or place in ("trash", "spam", "anywhere")
         hidden = () if everywhere else (self.folder_id("deleteditems"), self.folder_id("junkemail"))
-        now = datetime.now(timezone.utc)
-        for m in self.g.pages(url, params):
-            if m.get("parentFolderId") not in hidden and all(self._holds(m, k, v, now) != neg for neg, k, v in terms):
-                yield m
+        now, seen = datetime.now(timezone.utc), set()
+        for source, how in sources:
+            for m in self.g.pages(source, how):
+                if m["id"] not in seen and m.get("parentFolderId") not in hidden and \
+                        all(self._holds(m, k, v, now) != neg for neg, k, v in terms):
+                    seen.add(m["id"])
+                    yield m
 
     def _holds(self, m: dict, word: str, value: str, now: datetime) -> bool:
         if word == "from":
@@ -291,7 +368,8 @@ class OutlookBox:
             value = value.lower()
             return address == value or address.endswith(("@" + value, "." + value))
         if word == "label":
-            return any(same_label(value, c) for c in m.get("categories") or [])
+            folder = self.label_of(m.get("parentFolderId"))
+            return any(same_label(value, l) for l in ([folder] if folder else []) + notes(m)[0])
         if word == "in":
             return value == "anywhere" or m.get("parentFolderId") == self.folder_id(FOLDERS[value.upper()])
         n, unit = AGE.fullmatch(value).groups()
@@ -318,38 +396,50 @@ class OutlookBox:
         path = f"/me/messages/{quote(msg_id, safe='')}"
         put = [n for n in add if n not in FOLDERS and n not in OTHER]
         take = [n for n in remove if n not in FOLDERS and n not in OTHER]
-        clear = "user_labels" in remove
-        # where it goes: a folder it is sent to, else Archive when it has to leave the folder it is in
-        to = "deleteditems" if trash or "TRASH" in add else "junkemail" if "SPAM" in add else \
-            "inbox" if "INBOX" in add else None
-        leaves = [FOLDERS[n] for n in FOLDERS if n in remove]
-        now = {}
-        if ((put or take) and not clear) or (to is None and leaves):
-            now = self.g.call("GET", path, params={"$select": "categories,parentFolderId"})
+        m = self.g.call("GET", path, params={"$select": "parentFolderId", "$expand": NOTES})
+        here, (noted, came_from) = m.get("parentFolderId"), notes(m)
+        folder = self.label_of(here)
+        kept = [] if "user_labels" in remove else \
+            [l for l in dict.fromkeys(([folder] if folder else []) + noted) if l not in take]
+        labels = kept + [l for l in put if l not in kept]
+        first = (put or labels or [None])[0]   # the label whose folder it goes to, when it has to go somewhere
+        inbox, deleted, junk = (self.folder_id(f) for f in ("inbox", "deleteditems", "junkemail"))
+        if trash or "TRASH" in add:
+            to = deleted
+        elif "SPAM" in add:
+            to = junk
+        elif "INBOX" in add:
+            to = inbox
+        elif (here == deleted and "TRASH" in remove) or (here == junk and "SPAM" in remove):
+            to = came_from or (self.label_folder(first, create=True) if first else self.folder_id(self.archive))
+        elif (here == inbox and "INBOX" in remove) or (folder and folder not in labels) or \
+                (put and here not in (inbox, deleted, junk) and folder not in labels):
+            to = self.label_folder(first, create=True) if first else self.folder_id(self.archive)
+        else:
+            to = here
         change: dict = {}
-        if clear:
-            change["categories"] = put
-        elif put or take:
-            have = list(now.get("categories") or [])
-            new = [c for c in have if c not in take] + [c for c in put if c not in have]
-            if new != have:
-                change["categories"] = new
+        notes_now = []
+        if labels != noted:
+            notes_now.append({"id": LABELS, "value": ";" + "".join(f"{l};" for l in labels)})
+        if to in (deleted, junk) and here not in (deleted, junk) and here != came_from:
+            notes_now.append({"id": CAME_FROM, "value": here})
+        if notes_now:
+            change["singleValueExtendedProperties"] = notes_now
         if "UNREAD" in remove or "UNREAD" in add:
             change["isRead"] = "UNREAD" not in add
         if "STARRED" in add or "STARRED" in remove:
             change["flag"] = {"flagStatus": "flagged" if "STARRED" in add else "notFlagged"}
-        if to is None and now.get("parentFolderId") in [self.folder_id(f) for f in leaves]:
-            to = self.archive
         if change:
             self.g.call("PATCH", path, body=change)
-        if to:
+        if to != here:
             self.g.call("POST", path + "/move", body={"destinationId": to})
 
     # ------------------------------------------------------------ what changed
 
     def checkpoint(self) -> str:
-        """Where the inbox stands now: the address that answers with what arrived after this moment."""
-        return self._arrivals("/me/mailFolders/inbox/messages/delta", {"changeType": "created", "$select": "id"})[1]
+        """Where the inbox stands now: what arrives after this moment is reported. Folders a trigger watches join
+        the checkpoint the first time they are watched."""
+        return json.dumps({"INBOX": self._arrivals("/me/mailFolders/inbox/messages/delta", CREATED)[1]})
 
     def _arrivals(self, url: str, params: dict | None = None) -> tuple[list[str], str]:
         ids: list[str] = []
@@ -361,10 +451,11 @@ class OutlookBox:
             url, params = res["@odata.nextLink"], None
 
     def changes(self, start: str, watch: list[str] = ()) -> tuple[list[dict], list[dict], str]:
-        """(messages that arrived in the inbox, inbox mail now carrying a label of `watch`, new checkpoint)."""
+        """(messages that arrived in the inbox, messages moved into the folder of a label of `watch`, new checkpoint)."""
         from mailman.mailbox import Expired
+        links = json.loads(start) if start.startswith("{") else {"INBOX": start}   # 0.7 kept the inbox's alone
         try:
-            ids, latest = self._arrivals(start)
+            ids, links["INBOX"] = self._arrivals(links["INBOX"])
         except GraphError as e:
             if e.status_code == 410:
                 raise Expired(start) from e
@@ -373,11 +464,19 @@ class OutlookBox:
         for label in watch:
             if label in FOLDERS or label in OTHER:
                 continue
-            for i in self.search(f'in:inbox label:"{label}"'):
-                if i not in self.noticed:
-                    self.noticed.add(i)
-                    labelled.append({"id": i, "labels": [label]})
-        return [{"id": i, "labels": ["INBOX"]} for i in ids], labelled, latest
+            try:
+                if label in links:
+                    got, links[label] = self._arrivals(links[label])
+                    labelled += [{"id": i, "labels": [label]} for i in got]
+                else:   # watched for the first time: from now on (the folder is made, ready to move mail into)
+                    folder = self.label_folder(label, create=True)
+                    links[label] = self._arrivals(f"/me/mailFolders/{folder}/messages/delta", CREATED)[1]
+            except GraphError as e:
+                if e.status_code not in (404, 410):
+                    raise
+                links.pop(label, None)   # the folder was removed or its checkpoint expired: start it again
+                self.scanned = 0.0
+        return [{"id": i, "labels": ["INBOX"]} for i in ids], labelled, json.dumps(links)
 
     def waiter(self, renew: int) -> "Poll":
         return Poll(self.poll)
