@@ -128,6 +128,11 @@ def problems(engine) -> list[str]:
         job = body.get("on_new_entry")
         if job and job not in cfg.jobs.get("jobs", {}):
             out.append(f"list {name}: on_new_entry names unknown job “{job}”")
+        job = body.get("on_removed_entry")
+        if job and job not in cfg.jobs.get("jobs", {}):
+            out.append(f"list {name}: on_removed_entry names unknown job “{job}”")
+        elif job and not ("search" in cfg.jobs["jobs"][job] and "outcome" in cfg.jobs["jobs"][job]):
+            out.append(f"list {name}: on_removed_entry job “{job}” needs a search and an outcome")
     return out
 
 

@@ -24,6 +24,7 @@ from mailman.engine import validate
 from mailman.engine.config import FILES, Config, config_dir
 from mailman.engine.core import Engine
 from mailman.engine.daemon import data_dir
+from mailman.engine.jobs import Runner
 from mailman.engine.lookups import MailboxLookups
 from mailman.store import Store
 from mailman.web import yamltext
@@ -153,7 +154,36 @@ class Workspace:
         broken = [{"id": mid, "sender": a["sender"], "subject": a["subject"], "expected": a["expected"], "after": a}
                   for mid, a in after.items() if a["expected"] and not self.meets(a)]
         return {"ok": not found, "problems": found, "changes": changes, "total": len(after),
-                "expectations_broken": broken, "stale_questions": stale}
+                "expectations_broken": broken, "stale_questions": stale,
+                "on_removed": self.removed_entries(cand) if name == "lists" else []}
+
+    def removed_entries(self, cand: Engine) -> list[dict]:
+        """Entries a candidate lists.yaml takes off a list that has an `on_removed_entry` job, and that nothing
+        left on the list still covers (an address whose domain stays listed is not removed): [{list, entry, job}]."""
+        out = []
+        for name, body in cand.config.lists.items():
+            if not body.get("on_removed_entry") or name not in self.engine.config.lists:
+                continue
+            left = {v.lower() for v in cand.lists.values(name)}
+            out += [{"list": name, "entry": e, "job": body["on_removed_entry"]} for e in self.engine.lists.values(name)
+                    if e.lower() not in left and not cand.lists.contains(name, e)]
+        return out
+
+    def run_removed(self, removed: list[dict]) -> list[dict]:
+        """Each removed entry's job, in every connected mailbox: how many messages it changed, or why it failed."""
+        done = []
+        for r in removed:
+            label = (self.engine.config.lists[r["list"]].get("source") or {}).get("gmail_label")
+            for box in self.boxes():
+                runner = Runner(self.engine, box, self.store, self.data, self.engine.config.settings.get("dry_run", False))
+                try:
+                    ids = runner.run_search(r["job"], {"entry": r["entry"].lower()})
+                    if label:
+                        runner.forget(label, ids)   # out of the label: no longer one of its senders
+                    done.append({**r, "mailbox": box.title, "messages": len(ids)})
+                except Exception as e:
+                    done.append({**r, "mailbox": box.title, "error": str(e)[:200]})
+        return done
 
     @staticmethod
     def meets(result: dict) -> bool:
@@ -293,6 +323,11 @@ class Workspace:
             self.overlay = {}
         self.reload()
         self.store.event("config_saved", f"{name}.yaml · {len(result['changes'])} of {result['total']} test emails change")
+        if result["on_removed"]:   # taken off a list: e.g. a sender you unblock has its mail brought back
+            result["removed_runs"] = self.run_removed(result["on_removed"])
+            for r in result["removed_runs"]:
+                self.store.event("job_run", f"{r['job']} {r['entry']} ({r['mailbox']}): "
+                                            f"{r['error'] if 'error' in r else str(r['messages']) + ' messages'}")
         return result
 
     # ------------------------------------------------------------ structured edits (return candidate text)

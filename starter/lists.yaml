@@ -18,6 +18,7 @@ blocked:
       addresses:
       - '{{identity | emails}}'
   on_new_entry: retro_block
+  on_removed_entry: unblock
   entries: []
 periodicals:
   description: 'newsletters you read: label Periodicals, always out of the inbox'

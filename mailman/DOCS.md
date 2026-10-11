@@ -66,6 +66,15 @@ When something needs attention (the classifier is out of credits, a mailbox is d
 Mailman says so on every page and in Home Assistant: `binary_sensor.mailman_problem`,
 `sensor.mailman_waiting`, and a notification that disappears when the problem is over.
 
+## Blocking a sender
+
+Move one of their emails to **Blocked**: a label in Gmail, a folder in Outlook. Within a few minutes the sender
+is on the blocked list (Lists → blocked), that email and the sender's other mail go to Trash, and their new mail
+is trashed as it arrives.
+
+To unblock, take the sender off the blocked list and save. Their mail loses the Blocked label, leaves Trash and
+comes back to the inbox. The save dialog says so before anything changes.
+
 ## What it does to your mail
 
 By default it moves mail to Trash (recoverable for 30 days), adds and removes labels, and takes mail out of

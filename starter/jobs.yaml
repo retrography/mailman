@@ -7,6 +7,9 @@ triggers:
 - 'on': label_added
   label: Blocked
   run: sync_blocked
+- 'on': label_added
+  label: Blocked
+  run: trash_blocked
 - 'on': start
   run: retry_failed
 - 'on': interval
@@ -28,6 +31,13 @@ jobs:
   sync_blocked:
     help: 'you (or Spark) blocked something: add the new senders to the list'
     sync_list: blocked
+  trash_blocked:
+    help: 'what you moved to Blocked goes to Trash, out of every other label (unblocking brings it back)'
+    search: label:Blocked -in:trash -in:spam
+    outcome: block_everywhere
+    log:
+      decision: block
+      rule: moved_to_blocked
   retro_block:
     help: 'for each new entry of the blocked list: its existing mail is labelled Blocked and deleted'
     search: from:{entry} -label:Blocked -in:trash -in:spam
