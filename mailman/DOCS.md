@@ -73,7 +73,8 @@ is on the blocked list (Lists → blocked), that email and the sender's other ma
 is trashed as it arrives.
 
 To unblock, take the sender off the blocked list and save. Their mail loses the Blocked label, leaves Trash and
-comes back to the inbox. The save dialog says so before anything changes.
+goes through the rules again, as if it had just arrived: it may be filed, labelled or deleted like any new
+email. The save dialog says so before anything changes.
 
 ## What it does to your mail
 

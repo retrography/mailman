@@ -3,6 +3,15 @@
 All notable changes to Mailman. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) as described in the README.
 
+## [0.10.0] - 2026-10-11
+
+### Added
+- An action setting `then_run`: the emails an action changed then go through an action that applies the rules,
+  at the daemon's next round. The starter's `unblock` runs `classify`, so unblocked mail is filed, labelled or
+  deleted like new mail instead of all landing in the inbox. The Actions page has a field for it.
+
+Existing installations keep their configuration: add `then_run: classify` to the action `unblock` (Actions).
+
 ## [0.9.0] - 2026-10-11
 
 ### Added

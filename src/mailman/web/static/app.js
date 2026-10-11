@@ -883,13 +883,14 @@ function jobForm(holder, key, ctx) {
       fieldFor({ key: 'enabled', type: 'bool', default: true, label: 'enabled' }, j, c),
       kind !== 'sync' ? fieldFor({ key: 'search', type: 'text', mono: true, wide: true, label: 'Gmail search', help: kind === 'rules' ? 'empty: the messages its trigger hands it. {name}: a parameter' : '{name}: a parameter of the run' }, j, c) : null,
       kind === 'search' ? fieldFor({ key: 'outcome', type: 'select', options: () => Object.keys(ctx.cat.outcomes) }, j, c) : null,
+      kind === 'search' ? fieldFor({ key: 'then_run', type: 'select', label: 'afterwards, the messages go through', options: () => ctx.jobs, optional: 'nothing', help: 'a job that applies the rules; the daemon runs it at its next round' }, j, c) : null,
       kind === 'sync' ? fieldFor({ key: 'sync_list', label: 'list', type: 'select', options: listNames, optional: 'choose…' }, j, c) : null,
       kind === 'rules' ? [fieldFor({ key: 'only_if_in', type: 'text', label: 'only if the message is still in', suggest: () => ['INBOX', ...ctx.cat.labels] }, j, c),
         fieldFor({ key: 'ids_from', type: 'select', label: 'messages from', options: [['failed', 'the log: attempts that all failed']], optional: 'its trigger or search' }, j, c),
         fieldFor({ key: 'never_move_to_inbox', type: 'bool', label: 'never move mail into the inbox' }, j, c)] : null,
       fieldFor({ key: 'manual', type: 'strings', inline: true, label: 'parameters when run by hand' }, j, c),
       kind !== 'rules' ? fieldFor({ key: 'log', type: 'object', lazy: true, label: 'in the log', fields: [{ key: 'decision', type: 'text' }, { key: 'rule', type: 'text', help: '{name}: a parameter' }] }, j, c) : null,
-      formFor([], j, { ...c, ignore: ['help', 'rules', 'sync_list', 'outcome', 'enabled', 'search', 'only_if_in', 'ids_from', 'never_move_to_inbox', 'manual', 'log'] })));
+      formFor([], j, { ...c, ignore: ['help', 'rules', 'sync_list', 'outcome', 'then_run', 'enabled', 'search', 'only_if_in', 'ids_from', 'never_move_to_inbox', 'manual', 'log'] })));
   };
   draw();
   return box;

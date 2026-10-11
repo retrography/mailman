@@ -7,7 +7,8 @@ A job is one of:
 A list's `on_removed_entry` job runs for each entry you take off it in the interface (e.g. unblock).
   search + outcome            perform an outcome on every message a search (in Gmail's words) finds
 Options: enabled, only_if_in (a label the message must still carry), include_trash (the search also looks
-in Trash and Spam), log {decision, rule}, manual [params].
+in Trash and Spam), log {decision, rule}, manual [params], then_run (a rules job: the messages a search changed
+then go through it, at the daemon's next round — e.g. unblocked mail through the rules, as if it had just arrived).
 `{name}` in a search or a log text is a parameter of the run (e.g. {entry}, {label}).
 A runner works on one mailbox (mailman.mailbox); what it logs and caches is kept per mailbox.
 """
@@ -125,6 +126,8 @@ class Runner:
             self.log(gmail_id=i, sender=str(params.get("entry", "")), decision=entry.get("decision", ""),
                            rule=entry.get("rule", name).format(**params), dry_run=self.dry_run,
                            action="error" if i in failed else word, error=failed.get(i))
+        if job.get("then_run") and not self.dry_run:   # the daemon takes them from here
+            self.store.enqueue(self.box.name, [i for i in ids if i not in failed], job["then_run"])
         if ids:
             log.info("%s %s: %d messages%s", name, " ".join(map(str, params.values())), len(ids),
                      f" ({len(failed)} failed)" if failed else "")

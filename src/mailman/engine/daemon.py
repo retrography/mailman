@@ -152,6 +152,15 @@ class Daemon:
                 retries = {i for i, _ in work}
         self.started = True
         seen = {i for i, _ in work}
+        queued: set[str] = set()   # handed over by an action's then_run (e.g. unblocked mail): handled before, but due again
+        for msg_id, name in self.store.pending(self.box.name):
+            job = self.engine.config.jobs["jobs"].get(name)
+            if job is None or msg_id in seen:
+                self.store.done(self.box.name, msg_id)
+                continue
+            seen.add(msg_id)
+            queued.add(msg_id)
+            work.append((msg_id, job))
         for t in self.triggers("new_mail"):
             lid, job = self.box.label_id(t["label"]), self.runner.job(t["run"])
             for m in added:
@@ -172,6 +181,8 @@ class Daemon:
                         continue
                     if await self.runner.classify(client, msg_id, job) is False and msg_id in retries:
                         still_failing = True
+                    if msg_id in queued:   # done, or failed and logged: retry_failed takes it from there
+                        self.store.done(self.box.name, msg_id)
 
         asyncio.run(run())
         if not self.stopping:
