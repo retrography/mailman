@@ -3,6 +3,23 @@
 All notable changes to Mailman. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) as described in the README.
 
+## [0.9.0] - 2026-10-11
+
+### Added
+- A list setting `on_removed_entry`: a job that runs, in every mailbox, for each entry you take off the list in
+  the interface. The save dialog lists those entries before you save, and Health shows what each run did.
+- The starter configuration's blocked list runs `unblock` for a sender you take off it, and a new action
+  `trash_blocked` sends what you move to Blocked to Trash.
+
+### Fixed
+- A sender taken off the blocked list came back at the next block. Their mail kept the Blocked label, and the
+  list is filled from that label. With `on_removed_entry: unblock` the label comes off with the entry.
+- Mail you moved to Blocked stayed there. `trash_blocked` sends it to Trash; until now only the sender's
+  other mail was trashed.
+
+Existing installations keep their configuration. To get both fixes, add `on_removed_entry: unblock` to the
+blocked list (Lists), and the action `trash_blocked` with a trigger `label_added: Blocked` (Actions).
+
 ## [0.8.0] - 2026-10-11
 
 ### Changed

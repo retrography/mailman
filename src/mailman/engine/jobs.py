@@ -4,6 +4,7 @@ A job is one of:
   rules: true                 apply the rules to messages (new mail, a retry, or a label clean-up)
   sync_list: <list>           fill a list from its `source` (the senders of the mail in a label),
                               normalise it, save it, and run the list's `on_new_entry` job per new entry
+A list's `on_removed_entry` job runs for each entry you take off it in the interface (e.g. unblock).
   search + outcome            perform an outcome on every message a search (in Gmail's words) finds
 Options: enabled, only_if_in (a label the message must still carry), include_trash (the search also looks
 in Trash and Spam), log {decision, rule}, manual [params].

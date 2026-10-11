@@ -311,6 +311,10 @@ async function reviewAndSave(file, text, after) {
     body.append(h('div', { class: 'banner bad' }, h('b', {}, `${r.expectations_broken.length} email(s) you marked would not get the outcome you expect:`),
       h('ul', {}, r.expectations_broken.map(x => h('li', {}, `${x.subject} — expected ${x.expected.decision}, gets ${x.after.outcome} (${x.after.rule || 'no rule'})`)))));
   }
+  if (r.on_removed && r.on_removed.length) {
+    body.append(h('div', { class: 'banner warn' }, h('b', {}, 'Saving also changes mail:'),
+      h('ul', {}, r.on_removed.map(x => h('li', {}, `${x.entry} leaves ${x.list}: the job “${x.job}” runs for it in every mailbox`)))));
+  }
   if (!r.problems.length) {
     body.append(h('div', { class: 'banner ' + (r.changes.length ? 'warn' : 'ok') },
       r.changes.length ? `${r.changes.length} of ${r.total} test emails get a different result:` : `No test email changes its result (${r.total} checked).`));
@@ -327,7 +331,9 @@ async function reviewAndSave(file, text, after) {
     h('button', { class: 'primary', disabled: !r.ok, onclick: wrap(async () => {
       const s = await api('PUT', `api/config/${file}`, { text });
       if (!s.ok) { toast('not saved: ' + s.problems.join('; '), 7000); return; }
-      closeModal(); toast(`${file}.yaml saved`); CAT = null; if (after) after();
+      const runs = (s.removed_runs || []).map(x => x.error ? `${x.job} ${x.entry} failed in ${x.mailbox}: ${x.error}`
+        : `${x.job} ${x.entry} (${x.mailbox}): ${x.messages} email${x.messages === 1 ? '' : 's'}`);
+      closeModal(); toast([`${file}.yaml saved`, ...runs].join(' · '), runs.length ? 9000 : undefined); CAT = null; if (after) after();
     }) }, 'Save')));
   modal(body, true);
 }
@@ -902,7 +908,8 @@ const listOptionsFields = ctx => [
   { key: 'normalise', type: 'object', lazy: true, label: 'kept tidy', fields: [
     { key: 'collapse_to_domain_at', type: 'number', label: 'this many addresses of one domain become the domain' },
     { key: 'never_collapse', type: 'object', label: 'never collapsed', fields: [{ key: 'lists', type: 'strings', inline: true, suggest: listNames, label: 'domains on the lists' }, { key: 'addresses', type: 'strings', label: 'the domains of these addresses', help: 'placeholders allowed' }] }] },
-  { key: 'on_new_entry', type: 'select', label: 'for each new entry, run the job', options: () => ctx.jobs, optional: 'nothing' }];
+  { key: 'on_new_entry', type: 'select', label: 'for each new entry, run the job', options: () => ctx.jobs, optional: 'nothing' },
+  { key: 'on_removed_entry', type: 'select', label: 'for each entry taken off, run the job', options: () => ctx.jobs, optional: 'nothing' }];
 
 const PROFILE_LABELS = { reads: 'languages you read', communicates: 'languages you communicate in', suspects: 'suspect languages', lived_in: 'countries you have lived in', plausible_business: 'countries you plausibly do business with', suspect: 'suspect countries', first_name: 'first name', last_names: 'last names', middle_names: 'middle names', emails: 'email addresses', usernames: 'usernames', postal_address: 'postal address' };
 function inferredForm(labels) {
