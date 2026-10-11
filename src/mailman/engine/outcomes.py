@@ -5,7 +5,7 @@
   log_as  the word the log uses for it (default: the outcome's name)
   undo    the operations that reverse it
 Label changes of one outcome go to Gmail as a single call. Labels that do not exist are created. In an Outlook
-mailbox a label is a category and INBOX / TRASH / SPAM are folders (mailman.outlook).
+mailbox a label is a folder, as INBOX / TRASH / SPAM are (mailman.outlook).
 """
 
 from __future__ import annotations

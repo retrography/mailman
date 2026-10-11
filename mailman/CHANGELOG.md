@@ -3,6 +3,18 @@
 All notable changes to Mailman. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) as described in the README.
 
+## [0.8.0] - 2026-10-11
+
+### Changed
+- Outlook: a label is a folder of that name instead of a category, which no mail client shows. Folders are
+  made when first needed (`Travel/2026` is a subfolder), and your own folders count as labels. Filing puts
+  mail in the folder of its first label, or in Archive without one.
+- Outlook: moving an email to the Blocked folder blocks its sender, from wherever it was moved. Mailman makes
+  the folder when it starts.
+
+### Fixed
+- Outlook: undoing a delete or a spam brings the email back where it was, not to Archive.
+
 ## [0.7.1] - 2026-10-10
 
 ### Added

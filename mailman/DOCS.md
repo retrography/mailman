@@ -39,10 +39,15 @@ An Outlook.com (or Microsoft 365) mailbox can be sorted by the same rules, next 
 
 In an Outlook mailbox:
 
-- A label is a category (no nesting). Filing moves mail to Archive; delete and spam move it to Deleted Items
-  and Junk Email. Undoing a delete brings mail back to Archive, not to the inbox.
+- A label is a folder of that name, made the first time it is needed (`Travel/2026` is a subfolder). Your own
+  folders count as labels too, including those inside Inbox.
+- A message is in one folder. Filing puts it in the folder of its first label, or in Archive when it has
+  none. An email kept in the inbox stays there; its labels are remembered out of sight, so searches and
+  flags still see them.
+- Delete and spam move mail to Deleted Items and Junk Email. Undoing brings it back where it was.
+- To block a sender, move one of their emails to the Blocked folder, from anywhere. Mailman makes the folder
+  when it starts.
 - New mail is noticed within a minute (`outlook.poll_seconds` in Settings), not at once.
-- A label you put on mail yourself (such as Blocked) is noticed on mail in the inbox only.
 - Searches in jobs and flags may use only `from:`, `label:`, `in:`, `older_than:` and `newer_than:` (and their
   negations); a job with any other word fails for the Outlook mailbox.
 
