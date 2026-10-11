@@ -3,6 +3,15 @@
 All notable changes to Mailman. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) as described in the README.
 
+## [0.10.1] - 2026-10-12
+
+### Changed
+- The page with actions and triggers is called Automations, at `#/automations`; its tabs stay Actions and
+  Triggers. The old addresses `#/actions` and `#/jobs` no longer open it.
+- An action's `then_run` field is labelled "post".
+- Labels that apply to any mailbox no longer say Gmail: "search", "label", the Outcomes page, lookups, list
+  sources, and the label clean-up.
+
 ## [0.10.0] - 2026-10-11
 
 ### Added

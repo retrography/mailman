@@ -567,7 +567,7 @@ function ruleEditor(stage, index, rule, cat) {
       h('div', { class: 'row' },
         h('label', { class: 'f grow' }, 'Name', h('input', { value: r.name || '', oninput: e => { r.name = e.target.value.trim(); } })),
         stage.match === 'all'
-          ? h('label', { class: 'f' }, 'Gmail label', h('input', { value: r.label || '', list: 'labels-dl', oninput: e => { r.label = e.target.value.trim(); } }), h('datalist', { id: 'labels-dl' }, cat.labels.map(l => h('option', { value: l }))))
+          ? h('label', { class: 'f' }, 'label', h('input', { value: r.label || '', list: 'labels-dl', oninput: e => { r.label = e.target.value.trim(); } }), h('datalist', { id: 'labels-dl' }, cat.labels.map(l => h('option', { value: l }))))
           : h('label', { class: 'f' }, 'Outcome', h('select', { onchange: e => { r.then = e.target.value; } }, Object.entries(cat.outcomes).map(([o, help]) => h('option', { value: o, selected: o === r.then, title: help }, o)))),
         stage.match === 'all' ? h('label', { class: 'row', style: 'margin-top:8px' }, h('input', { type: 'checkbox', checked: !!r.leftover, onchange: e => { r.leftover = e.target.checked; } }), 'only if no rule above matched') : null),
       h('label', { class: 'f' }, 'Note', h('textarea', { class: 'prose', rows: 2, oninput: e => { r.note = e.target.value; } }, r.note || '')),
@@ -674,7 +674,7 @@ async function viewLists() {
         addBox.value = ''; draw();
       } }, 'Add to the table'))),
     records ? null : h('div', { class: 'panel' }, h('h3', { style: 'margin-top:0' }, 'Find candidates'),
-      h('p', { class: 'muted' }, 'Senders of the mail a Gmail search finds (up to 300 messages), to tick and add.'),
+      h('p', { class: 'muted' }, 'Senders of the mail a search finds (up to 300 messages), to tick and add.'),
       h('div', { class: 'row' }, h('input', { id: 'cand-q', class: 'grow', placeholder: 'e.g. label:Kids   or   subject:(track trace)' }),
         h('button', { onclick: wrap(async ev => {
           ev.target.disabled = true; candBox.textContent = 'searching…';
@@ -727,7 +727,7 @@ const DETECTOR_TYPES = {
     { key: 'value', type: 'text', suggest: refs }, { key: 'on', label: 'on the list(s)', type: 'stringsOrOne', inline: true, suggest: listNames },
     { key: 'where', type: 'map', help: 'records only: field → value(s)' },
     { key: 'returns', label: 'gives', type: 'select', options: [['bool', 'yes / no'], ['record', 'the matching record']], default: 'bool' }] },
-  lookup: { label: 'lookup — count the results of a Gmail search (cached)', blank: { search: 'from:{sender_key}', max: 5 }, nested: [
+  lookup: { label: 'lookup — count the results of a search (cached)', blank: { search: 'from:{sender_key}', max: 5 }, nested: [
     { key: 'search', type: 'text', mono: true, wide: true, help: '{fact} is filled in' }, { key: 'max', type: 'number' },
     { key: 'exclude_self', type: 'bool', label: 'do not count this email' },
     { key: 'cache', type: 'array', add: 'cache case', help: 'first match wins; no match: not cached', blank: { ttl: '1d' }, fields: [
@@ -864,7 +864,7 @@ function opsField(label, key, obj, ctx) {
 const outcomeForm = (holder, key, ctx) => { const o = holder[key]; return h('div', { class: 'form' },
   fieldFor({ key: 'help', type: 'text', wide: true, label: 'what it means' }, o, ctx),
   fieldFor({ key: 'log_as', type: 'text', label: 'word in the log', help: 'empty: the outcome’s name' }, o, ctx),
-  opsField('what it does in Gmail, in order', 'do', o, ctx), opsField('undo (from the log)', 'undo', o, ctx),
+  opsField('what it does, in order', 'do', o, ctx), opsField('undo (from the log)', 'undo', o, ctx),
   formFor([], o, { ...ctx, ignore: ['help', 'log_as', 'do', 'undo'] })); };
 
 function jobForm(holder, key, ctx) {
@@ -879,11 +879,11 @@ function jobForm(holder, key, ctx) {
         const v = e.target.value; delete j.rules; delete j.sync_list; delete j.outcome;
         if (v === 'rules') j.rules = true; if (v === 'sync') { j.sync_list = ''; delete j.search; } if (v === 'search') { j.outcome = Object.keys(ctx.cat.outcomes)[0]; j.search = j.search || ''; }
         draw();
-      } }, [['rules', 'apply the rules to messages'], ['search', 'perform an outcome on what a search finds'], ['sync', 'fill a list from its Gmail label']].map(([v, t]) => h('option', { value: v, selected: v === kind }, t)))),
+      } }, [['rules', 'apply the rules to messages'], ['search', 'perform an outcome on what a search finds'], ['sync', 'fill a list from its label']].map(([v, t]) => h('option', { value: v, selected: v === kind }, t)))),
       fieldFor({ key: 'enabled', type: 'bool', default: true, label: 'enabled' }, j, c),
-      kind !== 'sync' ? fieldFor({ key: 'search', type: 'text', mono: true, wide: true, label: 'Gmail search', help: kind === 'rules' ? 'empty: the messages its trigger hands it. {name}: a parameter' : '{name}: a parameter of the run' }, j, c) : null,
+      kind !== 'sync' ? fieldFor({ key: 'search', type: 'text', mono: true, wide: true, label: 'search', help: kind === 'rules' ? 'empty: the messages its trigger hands it. {name}: a parameter' : '{name}: a parameter of the run' }, j, c) : null,
       kind === 'search' ? fieldFor({ key: 'outcome', type: 'select', options: () => Object.keys(ctx.cat.outcomes) }, j, c) : null,
-      kind === 'search' ? fieldFor({ key: 'then_run', type: 'select', label: 'afterwards, the messages go through', options: () => ctx.jobs, optional: 'nothing', help: 'a job that applies the rules; the daemon runs it at its next round' }, j, c) : null,
+      kind === 'search' ? fieldFor({ key: 'then_run', type: 'select', label: 'post', options: () => ctx.jobs, optional: 'nothing' }, j, c) : null,
       kind === 'sync' ? fieldFor({ key: 'sync_list', label: 'list', type: 'select', options: listNames, optional: 'choose…' }, j, c) : null,
       kind === 'rules' ? [fieldFor({ key: 'only_if_in', type: 'text', label: 'only if the message is still in', suggest: () => ['INBOX', ...ctx.cat.labels] }, j, c),
         fieldFor({ key: 'ids_from', type: 'select', label: 'messages from', options: [['failed', 'the log: attempts that all failed']], optional: 'its trigger or search' }, j, c),
@@ -905,7 +905,7 @@ const triggersForm = (holder, key, ctx) => fieldFor({ key, type: 'array', label:
 
 const listOptionsFields = ctx => [
   { key: 'match', type: 'text', label: 'records are matched on the field', help: 'records lists only' },
-  { key: 'source', type: 'object', lazy: true, label: 'filled from', fields: [{ key: 'gmail_label', type: 'text', label: 'the senders of the mail in the Gmail label', suggest: () => ctx.cat.labels }] },
+  { key: 'source', type: 'object', lazy: true, label: 'filled from', fields: [{ key: 'gmail_label', type: 'text', label: 'the senders of the mail in the label', suggest: () => ctx.cat.labels }] },
   { key: 'normalise', type: 'object', lazy: true, label: 'kept tidy', fields: [
     { key: 'collapse_to_domain_at', type: 'number', label: 'this many addresses of one domain become the domain' },
     { key: 'never_collapse', type: 'object', label: 'never collapsed', fields: [{ key: 'lists', type: 'strings', inline: true, suggest: listNames, label: 'domains on the lists' }, { key: 'addresses', type: 'strings', label: 'the domains of these addresses', help: 'placeholders allowed' }] }] },
@@ -1050,17 +1050,17 @@ function viewJev() {
 
 const viewOutcomes = () => entryView({
   file: 'outcomes', path: [], title: 'Outcomes', form: outcomeForm, blank: { help: '', do: [] },
-  lead: 'What each result of a rule does in Gmail. Label changes of one outcome go to Gmail as a single call; labels that do not exist are created.',
+  lead: 'What each result of a rule does to an email. Labels that do not exist are created (in Outlook, as folders).',
 });
 
 function viewJobs() {
   const section = sessionStorage.getItem('jobs-section') || 'jobs';
   const go = id => () => { sessionStorage.setItem('jobs-section', id); viewJobs(); };
   const sections = [['jobs', 'Actions'], ['triggers', 'Triggers']].map(([id, label]) => ({ label, on: id === section, go: go(id) }));
-  if (section === 'triggers') return entryView({ file: 'jobs', path: ['triggers'], single: true, entryTitle: 'Triggers', title: 'Actions', form: triggersForm, sections,
+  if (section === 'triggers') return entryView({ file: 'jobs', path: ['triggers'], single: true, entryTitle: 'Triggers', title: 'Automations', form: triggersForm, sections,
     lead: 'When actions run: on new mail in a label, when a label is put on a message, when the daemon starts, once a day, or every so many minutes.' });
   return entryView({
-    file: 'jobs', path: ['jobs'], title: 'Actions', form: jobForm, sections, blank: { help: '', rules: true },
+    file: 'jobs', path: ['jobs'], title: 'Automations', form: jobForm, sections, blank: { help: '', rules: true },
     lead: 'Everything besides deciding about one email: list syncs, retrospective moves, purges, clean-ups.',
     columns: (n, d) => isObj(d) ? (d.enabled === false ? 'off' : d.manual ? 'manual' : '') : '',
     tools: (box, ctx) => {
@@ -1094,7 +1094,7 @@ async function cleanupPanel(box) {
   const show = st => {
     clearTimeout(timer);
     const L = label.value, parts = [];
-    if (st.running) parts.push(h('div', { class: 'banner warn' }, `Previewing: ${st.classified} of ${st.total ?? '…'} emails classified. Nothing in Gmail changes. You can leave this page.`));
+    if (st.running) parts.push(h('div', { class: 'banner warn' }, `Previewing: ${st.classified} of ${st.total ?? '…'} emails classified. Nothing in the mailbox changes. You can leave this page.`));
     if (st.error) parts.push(h('div', { class: 'banner bad' }, h('b', {}, 'The preview stopped'), ' — ' + st.error, h('div', { class: 'fix' }, 'What was classified is kept. Press Preview to continue where it stopped.')));
     if (st.failed && !st.running) parts.push(h('div', { class: 'banner bad' }, `${st.failed} emails could not be classified and are left untouched: ${st.failure}`));
     if (st.applied) parts.push(h('p', { class: 'muted' }, `${st.applied} emails of this label were already applied earlier.`));
@@ -1358,13 +1358,10 @@ async function caseDetail(id, after) {
 // ---------------------------------------------------------------- routing
 
 const ROUTES = { log: viewLog, rules: viewRules, lists: viewLists, facts: viewFacts, jev: viewJev, outcomes: viewOutcomes,
-  testset: viewTestset, actions: viewJobs, profile: viewProfile, settings: viewSettings, health: viewHealth, backup: viewBackup };
-
-const ROUTE_ALIASES = { jobs: 'actions' };   // the Actions page was Automations at #/jobs: old bookmarks still work
+  testset: viewTestset, automations: viewJobs, profile: viewProfile, settings: viewSettings, health: viewHealth, backup: viewBackup };
 
 function route() {
-  let name = (location.hash.replace(/^#\//, '') || 'log').split('/')[0];
-  if (ROUTE_ALIASES[name]) { name = ROUTE_ALIASES[name]; history.replaceState(null, '', '#/' + name); }
+  const name = (location.hash.replace(/^#\//, '') || 'log').split('/')[0];
   document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('active', a.getAttribute('href') === '#/' + name));
   closeModal();
   main().replaceChildren(h('p', { class: 'muted' }, 'Loading…'));
