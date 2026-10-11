@@ -28,6 +28,8 @@ CREATE TABLE IF NOT EXISTS actions (
 CREATE INDEX IF NOT EXISTS actions_gmail_id ON actions (gmail_id);
 CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, kind TEXT, detail TEXT);
+CREATE TABLE IF NOT EXISTS pending (account TEXT NOT NULL, gmail_id TEXT NOT NULL, job TEXT NOT NULL, ts TEXT NOT NULL,
+                                    PRIMARY KEY (account, gmail_id));   -- for the daemon's next round
 """
 
 
@@ -55,6 +57,20 @@ class Store:
         """Something other than an email: a configuration save, an undo, a job run."""
         self.db.execute("INSERT INTO events (ts, kind, detail) VALUES (?, ?, ?)",
                         (datetime.now(timezone.utc).isoformat(timespec="seconds"), kind, detail))
+        self.db.commit()
+
+    def enqueue(self, account: str, ids: list[str], job: str) -> None:
+        """Messages the mailbox's daemon puts through a job at its next round (e.g. the rules, after an unblock)."""
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        self.db.executemany("INSERT OR REPLACE INTO pending VALUES (?, ?, ?, ?)", [(account, i, job, now) for i in ids])
+        self.db.commit()
+
+    def pending(self, account: str) -> list[tuple[str, str]]:
+        """(message, job) waiting for the mailbox's daemon, oldest first."""
+        return self.db.execute("SELECT gmail_id, job FROM pending WHERE account = ? ORDER BY ts", (account,)).fetchall()
+
+    def done(self, account: str, gmail_id: str) -> None:
+        self.db.execute("DELETE FROM pending WHERE account = ? AND gmail_id = ?", (account, gmail_id))
         self.db.commit()
 
     def handled(self, gmail_id: str) -> bool:

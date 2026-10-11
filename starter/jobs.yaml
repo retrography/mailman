@@ -59,6 +59,7 @@ jobs:
     - entry
     search: from:{entry} label:Blocked
     outcome: unblock
+    then_run: classify
     log:
       decision: keep
       rule: unblock:{entry}

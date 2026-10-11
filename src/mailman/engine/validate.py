@@ -117,6 +117,12 @@ def problems(engine) -> list[str]:
             out.append(f"job {name}: unknown outcome “{job['outcome']}”")
         if "sync_list" in job and job["sync_list"] not in lists:
             out.append(f"job {name}: unknown list “{job['sync_list']}”")
+        if "then_run" in job:
+            then = cfg.jobs["jobs"].get(job["then_run"])
+            if then is None:
+                out.append(f"job {name}: then_run names unknown job “{job['then_run']}”")
+            elif not then.get("rules"):
+                out.append(f"job {name}: then_run job “{job['then_run']}” must apply the rules (rules: true)")
     for t in cfg.jobs.get("triggers", []):
         if t["run"] not in cfg.jobs.get("jobs", {}):
             out.append(f"trigger {t['on']}: unknown job “{t['run']}”")
