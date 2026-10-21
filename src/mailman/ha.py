@@ -1,9 +1,14 @@
 """Entry point of the container (Home Assistant app, or any container): reads the options, prepares the
 storage, and keeps the web interface and one daemon per signed-in mailbox running.
 
-Storage (MAILMAN_HOME, default /config — the app's own folder, visible as /addon_configs/<app> and in backups):
+Storage (MAILMAN_HOME; under Home Assistant: mailman/ in its configuration folder, part of its backups):
   config/   the configuration files; seeded from the image on first start, yours from then on
-  data/     the log database, the test set, caches, and the mailbox sign-ins
+  data/     the log database, the test set, and caches
+The mailbox sign-ins (tokens.json) are kept apart, in the app's private folder /data, which no other app can read
+and which is part of the app's own backup. Outside Home Assistant they are in data/.
+
+Before 0.11.0 everything was in the app's own folder (/config, visible as /addon_configs/<app>). The first start
+of a newer version copies it to the new place, checks every file, and leaves the old folder as it was.
 
 Options (Home Assistant: /data/options.json): typesafe_api_key; optionally gmail_client_id, gmail_client_secret
 and gmail_refresh_token. Without a refresh token, sign in from the interface (Health → Connect Gmail).
@@ -12,6 +17,7 @@ For an Outlook mailbox as well: outlook_client_id (and outlook_tenant), then Hea
 
 from __future__ import annotations
 
+import filecmp
 import json
 import logging
 import os
@@ -22,18 +28,56 @@ import sys
 import time
 from pathlib import Path
 
+from mailman import tokens
+
 log = logging.getLogger("mailman.ha")
 OPTIONS = Path("/data/options.json")
+PRIVATE = OPTIONS.parent
+LEGACY = Path("/config")   # the app's own folder (addon_config): where versions before 0.11.0 kept everything
+SHARED = Path("/homeassistant")   # Home Assistant's configuration folder (homeassistant_config)
 DEFAULTS = Path(os.environ.get("MAILMAN_DEFAULTS", "/app/defaults/config"))
 ENV = {"typesafe_api_key": "TYPESAFE_API_KEY", "gmail_client_id": "GMAIL_CLIENT_ID",
        "gmail_client_secret": "GMAIL_CLIENT_SECRET", "gmail_refresh_token": "GMAIL_REFRESH_TOKEN",
        "outlook_client_id": "OUTLOOK_CLIENT_ID", "outlook_tenant": "OUTLOOK_TENANT"}
 
 
+def home_dir() -> Path:
+    if os.environ.get("MAILMAN_HOME"):
+        return Path(os.environ["MAILMAN_HOME"])
+    return SHARED / "mailman" if SHARED.is_dir() else LEGACY
+
+
+def move_in(home: Path) -> None:
+    """Copy config/ and data/ from where versions before 0.11.0 kept them, the first time. Every file is compared
+    with its copy before the copy is used; the old folder is left as it was, with a note. Stops the app rather
+    than start on a fresh configuration if it cannot."""
+    if home == LEGACY or (home / "config").exists() or not (LEGACY / "config").is_dir():
+        return
+    if home.exists() and any(home.iterdir()):
+        raise SystemExit(f"{home} has files but no config/: move them away, so that {LEGACY} can be moved there")
+    staging = home.with_name(home.name + ".moving")
+    shutil.rmtree(staging, ignore_errors=True)
+    for sub in ("config", "data"):
+        if (LEGACY / sub).is_dir():
+            shutil.copytree(LEGACY / sub, staging / sub, symlinks=True)
+    files = [f.relative_to(LEGACY) for sub in ("config", "data") for f in (LEGACY / sub).rglob("*") if f.is_file()]
+    differ = [str(f) for f in files if not filecmp.cmp(LEGACY / f, staging / f, shallow=False)]
+    if differ:
+        raise SystemExit(f"copying {LEGACY} to {home} went wrong ({', '.join(differ[:3])}); nothing was changed")
+    if home.exists():
+        home.rmdir()
+    staging.rename(home)
+    (LEGACY / "MOVED.txt").write_text(
+        f"Mailman 0.11.0 and later keep the configuration and data in {home} (Home Assistant's configuration\n"
+        f"folder: /config/{home.name} there) and the mailbox sign-ins in the app's private folder. Everything here\n"
+        f"was copied there on {time.strftime('%Y-%m-%d %H:%M')} and checked file by file; it is not used any more\n"
+        "and can be deleted. An older version of the app would still start from what is here.\n")
+    log.info("moved %d files from %s to %s", len(files), LEGACY, home)
+
+
 def prepare() -> dict[str, str]:
     """The environment both processes run in."""
-    home = Path(os.environ.get("MAILMAN_HOME", "/config"))
-    config, data = home / "config", home / "data"
+    config, data = home_dir() / "config", home_dir() / "data"
     data.mkdir(parents=True, exist_ok=True)
     if not config.exists():   # first start: the configuration shipped with the image becomes yours
         shutil.copytree(DEFAULTS, config)
@@ -41,9 +85,13 @@ def prepare() -> dict[str, str]:
     for missing in sorted(p.name for p in DEFAULTS.glob("*.yaml") if not (config / p.name).exists()):
         shutil.copy(DEFAULTS / missing, config / missing)   # a file a newer version added
         log.info("added the new configuration file %s", missing)
+    private = PRIVATE if OPTIONS.exists() else data   # under Home Assistant: only this app can read /data
+    if (data / "credentials.json").exists() and not (private / "credentials.json").exists():
+        shutil.move(data / "credentials.json", private / "credentials.json")
+    if moved := tokens.adopt(data, private / "tokens.json"):
+        log.info("the %s sign-in moved to %s", " and ".join(moved), private / "tokens.json")
     env = dict(os.environ, MAILMAN_CONFIG=str(config), MAILMAN_DATA=str(data),
-               MAILMAN_TOKEN_FILE=str(data / "token.json"), MAILMAN_CLIENT_SECRETS=str(data / "credentials.json"),
-               MAILMAN_OUTLOOK_TOKEN_FILE=str(data / "token-outlook.json"))
+               MAILMAN_TOKENS=str(private / "tokens.json"), MAILMAN_CLIENT_SECRETS=str(private / "credentials.json"))
     options = json.loads(OPTIONS.read_text()) if OPTIONS.exists() else {}
     for key, name in ENV.items():
         if str(options.get(key) or "").strip():
@@ -65,7 +113,7 @@ def take_import(home: Path) -> bool:
         with zipfile.ZipFile(bundle) as z:
             names = [n for n in z.namelist() if not n.endswith("/")]
             bad = [n for n in names if n.startswith("/") or ".." in Path(n).parts or Path(n).parts[0] not in ("config", "data")
-                   or Path(n).name in ("token.json", "token-outlook.json", "credentials.json")]
+                   or Path(n).name in ("tokens.json", *tokens.OLD.values(), "credentials.json")]
             if bad or not any(n.startswith("config/") for n in names):
                 raise ValueError(f"not a mailman bundle ({bad[:3] or 'no config/ inside'})")
             for n in names:
@@ -83,7 +131,8 @@ def take_import(home: Path) -> bool:
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    home = Path(os.environ.get("MAILMAN_HOME", "/config"))
+    home = home_dir()
+    move_in(home)   # before an import, which would otherwise make config/ here first
     home.mkdir(parents=True, exist_ok=True)
     take_import(home)
     env = prepare()

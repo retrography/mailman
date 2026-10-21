@@ -3,6 +3,21 @@
 All notable changes to Mailman. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) as described in the README.
 
+## [0.11.0] - 2026-10-21
+
+### Changed
+- The configuration and the data now live in Home Assistant's configuration folder, in `mailman/config` and
+  `mailman/data`, so they can be edited, versioned and backed up with the rest of it. The first start copies
+  them from `/addon_configs/<…>_mailman/`, compares every file with its copy, and leaves the old folder as it
+  was with a `MOVED.txt` note; delete it once you are happy. If the copy fails, the app stops instead of
+  starting on a fresh configuration.
+- The mailbox sign-ins are one file, `tokens.json`, kept in the app's private folder, which no other app (file
+  editor, Samba, VS Code) can read; it is in the app's own backup. `token.json` and `token-outlook.json` are
+  taken into it at the first start and removed. A Google OAuth client file (`credentials.json`) moves there too.
+- Running it yourself: `mailman auth` stores the sign-in in `data/tokens.json` (or `MAILMAN_TOKENS`); its
+  `--out` and the `MAILMAN_TOKEN_FILE` and `MAILMAN_OUTLOOK_TOKEN_FILE` settings are gone. An existing
+  `data/token.json` or `data/token-outlook.json` is taken in when the container starts.
+
 ## [0.10.1] - 2026-10-12
 
 ### Changed

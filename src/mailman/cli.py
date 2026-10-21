@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 import argparse
-import os
+import json
+import time
 from pathlib import Path
 
-from mailman import gmail, mailbox
+from mailman import gmail, mailbox, tokens
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
 def cmd_auth(args: argparse.Namespace) -> None:
-    """One-time local OAuth consent. Writes an authorized-user token (gitignored).
+    """One-time local OAuth consent. Stores the sign-in in tokens.json (gitignored).
 
     For the routine, copy client_id / client_secret / refresh_token from that file into the
     GMAIL_CLIENT_ID / GMAIL_CLIENT_SECRET / GMAIL_REFRESH_TOKEN secrets.
@@ -23,17 +24,12 @@ def cmd_auth(args: argparse.Namespace) -> None:
 
     flow = InstalledAppFlow.from_client_secrets_file(args.client_secrets, gmail.SCOPES)
     creds = flow.run_local_server(port=0, prompt="consent", access_type="offline")
-    out = Path(args.out)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(creds.to_json())
-    os.chmod(out, 0o600)
-    print(f"token written to {out}")
+    tokens.save("gmail", {**json.loads(creds.to_json()), "signed_in": time.time()})
+    print(f"signed in; the sign-in is kept in {tokens.path()}")
 
 
 def auth_outlook() -> None:
     """Sign in to an Outlook mailbox: open Microsoft's page on any device and type the code shown here."""
-    import time
-
     from mailman import outlook
     from mailman.engine import daemon
 
@@ -44,7 +40,7 @@ def auth_outlook() -> None:
     while time.time() < deadline:
         time.sleep(int(d.get("interval", 5)))
         if outlook.finish_sign_in(d["device_code"]):
-            return print(f"signed in; the sign-in is kept in {outlook.token_file()}")
+            return print(f"signed in; the sign-in is kept in {tokens.path()}")
     raise SystemExit("the code expired before it was entered: run this again")
 
 
@@ -161,7 +157,6 @@ def main() -> None:
     sub = p.add_subparsers(required=True)
     a = sub.add_parser("auth", help="one-time sign-in from this machine (Gmail; --outlook for an Outlook mailbox)")
     a.add_argument("--client-secrets", default=str(ROOT / "attic/py/data/credentials.json"))
-    a.add_argument("--out", default=str(ROOT / "data/cache/token.json"))
     a.add_argument("--outlook", action="store_true", help="sign in to an Outlook mailbox instead (needs OUTLOOK_CLIENT_ID)")
     a.set_defaults(fn=cmd_auth)
     d = sub.add_parser("daemon", help="watch the mailboxes and run the triggers of config/jobs.yaml")

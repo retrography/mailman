@@ -17,7 +17,6 @@ A mailbox offers:
 
 from __future__ import annotations
 
-import json
 import os
 import time
 
@@ -25,7 +24,7 @@ from googleapiclient.errors import HttpError
 from imapclient import IMAPClient
 from imapclient.exceptions import IMAPClientError
 
-from mailman import gmail, outlook
+from mailman import gmail, outlook, tokens
 
 ACCOUNTS = ("gmail", "outlook")
 TITLES = {"gmail": "Gmail", "outlook": "Outlook"}
@@ -44,15 +43,13 @@ def key(name: str, account: str) -> str:
 
 def signed_in(account: str) -> float | None:
     """When the account's sign-in was made (it changes when you sign in again); None without one."""
-    if account == "gmail":
-        path = os.environ.get("MAILMAN_TOKEN_FILE", "")
-        if path and os.path.exists(path):
-            return os.stat(path).st_mtime
-        return 1.0 if os.environ.get("GMAIL_REFRESH_TOKEN") else None
     try:
-        return float(json.loads(outlook.token_file().read_text()).get("signed_in") or 1.0)
+        saved = tokens.load(account)
     except (OSError, ValueError):
-        return None
+        saved = None
+    if saved:
+        return float(saved.get("signed_in") or 1.0)
+    return 1.0 if account == "gmail" and os.environ.get("GMAIL_REFRESH_TOKEN") else None
 
 
 def connected() -> list[str]:

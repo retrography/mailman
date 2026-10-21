@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import shutil
 import threading
+import time
 import asyncio
 import os
 from collections import Counter
@@ -20,7 +21,7 @@ from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from mailman import gmail, mailbox, outlook
+from mailman import gmail, mailbox, outlook, tokens
 from mailman.engine import outcomes as eo
 from mailman.engine import validate
 from mailman.engine.config import FILES
@@ -392,9 +393,6 @@ def create() -> FastAPI:
 
     # ------------------------------------------------------------ credentials
 
-    def token_path() -> Path:
-        return Path(os.environ.get("MAILMAN_TOKEN_FILE", ws.data / "token.json"))
-
     def secrets_path() -> Path:
         return Path(os.environ.get("MAILMAN_CLIENT_SECRETS", ws.data / "credentials.json"))
 
@@ -408,7 +406,7 @@ def create() -> FastAPI:
 
         (gmail_ok, detail), signed = state("gmail"), mailbox.signed_in("outlook") is not None
         outlook_ok, outlook_detail = state("outlook") if signed else (False, "no sign-in has been stored yet")
-        return {"gmail": {"connected": gmail_ok, "detail": detail, "token_file": str(token_path()),
+        return {"gmail": {"connected": gmail_ok, "detail": detail, "token_file": str(tokens.path()),
                           "client_secrets_present": secrets_path().exists() or bool(
                               os.environ.get("GMAIL_CLIENT_ID") and os.environ.get("GMAIL_CLIENT_SECRET")),
                           "fixed_token": bool(os.environ.get("GMAIL_REFRESH_TOKEN")),
@@ -433,11 +431,7 @@ def create() -> FastAPI:
                                  f"or place the client file at {secrets_path()}")
 
     def store_token(flow) -> None:
-        path = token_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(flow.credentials.to_json())
-        os.chmod(path, 0o600)
-        os.environ["MAILMAN_TOKEN_FILE"] = str(path)
+        tokens.save("gmail", {**json.loads(flow.credentials.to_json()), "signed_in": time.time()})
         ws.forget("gmail")
         ws.store.event("gmail_connected", "token stored")
 

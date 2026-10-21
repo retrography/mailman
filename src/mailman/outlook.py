@@ -13,8 +13,8 @@
 
 Sign-in is the device-code flow: you open Microsoft's page on any device and type a short code. It needs your
 own app registration (a public client that allows personal accounts): OUTLOOK_CLIENT_ID, and OUTLOOK_TENANT if
-the mailbox is not a personal one (default: consumers). The sign-in is kept in MAILMAN_OUTLOOK_TOKEN_FILE
-(default: token-outlook.json in the data folder).
+the mailbox is not a personal one (default: consumers). The sign-in is kept with the others
+(mailman.tokens).
 """
 
 from __future__ import annotations
@@ -29,12 +29,12 @@ import time
 from datetime import datetime, timedelta, timezone
 from email.utils import formataddr
 from itertools import islice
-from pathlib import Path
 from urllib.parse import quote
 
 import requests
 
-ROOT = Path(__file__).resolve().parents[2]
+from mailman import tokens
+
 LOGIN = "https://login.microsoftonline.com"
 GRAPH = "https://graph.microsoft.com/v1.0"
 SCOPES = "offline_access User.Read Mail.ReadWrite"
@@ -67,23 +67,13 @@ def tenant() -> str:
     return os.environ.get("OUTLOOK_TENANT", "").strip() or "consumers"
 
 
-def token_file() -> Path:
-    return Path(os.environ.get("MAILMAN_OUTLOOK_TOKEN_FILE") or
-                Path(os.environ.get("MAILMAN_DATA", ROOT / "data")) / "token-outlook.json")
-
-
 def _token(tenant_: str, data: dict) -> dict:
     return requests.post(f"{LOGIN}/{tenant_}/oauth2/v2.0/token", data=data, timeout=30).json()
 
 
 def _save(client: str, tenant_: str, refresh_token: str, signed_in: float) -> None:
-    path = token_file()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps({"client_id": client, "tenant": tenant_, "refresh_token": refresh_token,
-                               "signed_in": signed_in}))
-    os.chmod(tmp, 0o600)
-    tmp.replace(path)
+    tokens.save("outlook", {"client_id": client, "tenant": tenant_, "refresh_token": refresh_token,
+                            "signed_in": signed_in})
 
 
 def start_sign_in() -> dict:
@@ -122,9 +112,11 @@ class Graph:
         if time.time() < self.expires - 120:
             return self.access
         try:
-            saved = json.loads(token_file().read_text())   # read each time: another process may have renewed it
+            saved = tokens.load("outlook")   # read each time: another process may have renewed it
         except (OSError, ValueError):
-            raise RuntimeError("Outlook is not connected: no sign-in has been stored yet") from None
+            saved = None
+        if not saved:
+            raise RuntimeError("Outlook is not connected: no sign-in has been stored yet")
         d = _token(saved["tenant"], {"grant_type": "refresh_token", "client_id": saved["client_id"],
                                      "refresh_token": saved["refresh_token"], "scope": SCOPES})
         if "access_token" not in d:
