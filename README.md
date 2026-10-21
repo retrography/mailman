@@ -24,9 +24,9 @@ For an Outlook mailbox as well, your own Microsoft app registration (see the Doc
 ```bash
 uv sync
 cp -r starter config            # your configuration; edit config/profile.yaml
-uv run mailman auth --client-secrets credentials.json --out data/token.json
-MAILMAN_TOKEN_FILE=data/token.json TYPESAFE_API_KEY=… uv run mailman daemon
-MAILMAN_TOKEN_FILE=data/token.json TYPESAFE_API_KEY=… uv run mailman web     # http://127.0.0.1:8377
+uv run mailman auth --client-secrets credentials.json      # the sign-in goes to data/tokens.json
+TYPESAFE_API_KEY=… uv run mailman daemon
+TYPESAFE_API_KEY=… uv run mailman web     # http://127.0.0.1:8377
 ```
 
 An Outlook mailbox as well: `OUTLOOK_CLIENT_ID=… uv run mailman auth --outlook` (it shows a code to type on

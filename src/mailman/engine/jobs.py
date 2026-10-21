@@ -21,7 +21,7 @@ import time
 from email.utils import parseaddr
 from pathlib import Path
 
-from mailman import mailbox
+from mailman import jsonfile, mailbox
 from mailman.engine import lists as elists
 from mailman.engine import outcomes
 from mailman.engine.core import Engine
@@ -222,17 +222,22 @@ class Runner:
 
     # ------------------------------------------------------------ lists
 
+    def label_index(self, label: str) -> Path:
+        """A label's sender index, every mailbox's in one file: {mailbox: {message id: {from, subject}}}."""
+        return self.data / "cache" / f"{label.lower()}_index.json"
+
     def label_senders(self, label: str) -> set[str]:
         """Every sender address in a label (headers only, remembered per message)."""
         ids = self.box.in_label(label)
-        cache = self.cache(f"{label.lower()}_index.json")
-        index = json.loads(cache.read_text()) if cache.exists() else {}
+        index = jsonfile.read(self.label_index(label)).get(self.box.name, {})
+        new = {}
         for mid in ids:
             if mid not in index:
                 h = self.box.headers(mid)
-                index[mid] = {"from": parseaddr(h["from"])[1].lower(), "subject": h["subject"]}
-        cache.parent.mkdir(parents=True, exist_ok=True)
-        cache.write_text(json.dumps(index, indent=1, ensure_ascii=False))
+                new[mid] = {"from": parseaddr(h["from"])[1].lower(), "subject": h["subject"]}
+        with jsonfile.edit(self.label_index(label)) as everything:   # the other mailbox's daemon writes here too
+            everything.setdefault(self.box.name, {}).update(new)
+        index = {**index, **new}
         return {index[mid]["from"] for mid in ids if index[mid]["from"]}   # only mail in the label now
 
     def sync_list(self, name: str) -> dict:
@@ -265,12 +270,11 @@ class Runner:
 
     def forget(self, label: str, ids: list[str]) -> None:
         """Drop messages from a label's sender index (they left the label, e.g. after an unblock)."""
-        cache = self.cache(f"{label.lower()}_index.json")
-        if cache.exists():
-            index = json.loads(cache.read_text())
-            for i in ids:
-                index.pop(i, None)
-            cache.write_text(json.dumps(index, indent=1, ensure_ascii=False))
+        if self.label_index(label).exists():
+            with jsonfile.edit(self.label_index(label)) as everything:
+                mine = everything.get(self.box.name, {})
+                for i in ids:
+                    mine.pop(i, None)
 
     def remove_entries(self, name: str, entries: list[str]) -> list[str]:
         """Take entries off a list (manual jobs such as unblock). Returns the ones that were on it."""

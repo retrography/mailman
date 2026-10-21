@@ -1,7 +1,7 @@
-"""Gmail access. Credentials come from env vars (routine) or a local token file (dev).
+"""Gmail access. Credentials come from env vars (routine) or the stored sign-in (mailman.tokens).
 
 Env (routine): GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN.
-Dev fallback:  MAILMAN_TOKEN_FILE → an authorized-user token.json.
+Otherwise:     the "gmail" sign-in in tokens.json, made from the interface or `mailman auth`.
 """
 
 from __future__ import annotations
@@ -18,6 +18,8 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
+from mailman import tokens
+
 # Full mail scope: covers the Gmail API and IMAP (the daemon's IDLE connection needs IMAP).
 SCOPES = ["https://mail.google.com/"]
 TOKEN_URI = "https://oauth2.googleapis.com/token"
@@ -33,8 +35,8 @@ def credentials() -> Credentials:
             token_uri=TOKEN_URI,
             scopes=SCOPES,
         )
-    elif (path := os.environ.get("MAILMAN_TOKEN_FILE")) and os.path.exists(path):
-        creds = Credentials.from_authorized_user_file(path)
+    elif saved := tokens.load("gmail"):
+        creds = Credentials.from_authorized_user_info(saved)
     else:
         raise RuntimeError("Gmail is not connected: no sign-in has been stored yet")
     if not creds.valid:
