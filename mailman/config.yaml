@@ -19,7 +19,7 @@ homeassistant_api: true          # the alerts are shown in Home Assistant too
 watchdog: tcp://[HOST]:[PORT:8099]
 backup: hot
 map:
-  - type: homeassistant_config   # /homeassistant in the container: mailman/config and mailman/data live there
+  - type: homeassistant_config   # /homeassistant in the container: the configuration files, in mailman/
     read_only: false
   - type: addon_config           # /config in the container: where versions before 0.11.0 kept everything
     read_only: false

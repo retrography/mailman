@@ -53,16 +53,11 @@ In an Outlook mailbox:
 
 ## Where things are kept
 
-In Home Assistant's configuration folder, `mailman/`, which is part of Home Assistant backups:
-
-- `mailman/config/` — the configuration files. Created on first start; an update of the app never overwrites
-  them. Plain YAML, fine to keep in git.
-- `mailman/data/` — the log (`mailman.db`), the test set and caches. They hold personal mail: keep them out of
-  git.
-
-The mailbox sign-ins (`tokens.json`) are not there: they are in the app's private folder, which other apps
-cannot read, and in the app's own backup. Whoever has that file, or a backup that contains it, can read the
-mailboxes.
+- **The configuration files**: in Home Assistant's configuration folder, `mailman/`. Created on first start;
+  an update of the app never overwrites them. Plain YAML, part of Home Assistant backups, fine to keep in git.
+- **Everything else**: the log (`mailman.db`), the test set, caches, and the mailbox sign-ins (`tokens.json`),
+  in the app's private folder, which other apps cannot read, and in the app's own backup. The log and the test
+  set hold personal mail; whoever has `tokens.json`, or a backup that contains it, can read the mailboxes.
 
 Versions before 0.11.0 kept all of this in `/addon_configs/<…>_mailman/`. The first start of a newer version
 copies it over and checks every file; the old folder is left as it was, with a `MOVED.txt` note, and can be

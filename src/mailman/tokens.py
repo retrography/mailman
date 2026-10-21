@@ -4,17 +4,16 @@
    "outlook": {client_id, tenant, refresh_token, signed_in}}
 
 signed_in is when that sign-in was made; it changes when you sign in again. Whoever has this file can read the
-mailboxes: it is written 0600 and never part of an export. The web interface and the daemons write to it at the
-same time, so each write takes a lock and replaces the file whole.
+mailboxes: it is written 0600 and never part of an export.
 """
 
 from __future__ import annotations
 
-import fcntl
 import json
 import os
-from contextlib import contextmanager
 from pathlib import Path
+
+from mailman import jsonfile
 
 ROOT = Path(__file__).resolve().parents[2]
 OLD = {"gmail": "token.json", "outlook": "token-outlook.json"}   # one file per mailbox, before 0.11.0
@@ -24,36 +23,14 @@ def path() -> Path:
     return Path(os.environ.get("MAILMAN_TOKENS") or Path(os.environ.get("MAILMAN_DATA", ROOT / "data")) / "tokens.json")
 
 
-def _read(p: Path) -> dict:
-    try:
-        return json.loads(p.read_text())
-    except FileNotFoundError:
-        return {}
-
-
 def load(account: str) -> dict | None:
     """The account's sign-in; None without one."""
-    return _read(path()).get(account)
-
-
-@contextmanager
-def _all(p: Path):
-    """Every sign-in in `p`, to change in place; written back when the block ends."""
-    p.parent.mkdir(parents=True, exist_ok=True)
-    with open(p.with_name(p.name + ".lock"), "w") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        everything = _read(p)
-        yield everything
-        tmp = p.with_name(p.name + ".tmp")
-        with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
-            json.dump(everything, f, indent=1)
-        os.chmod(tmp, 0o600)
-        tmp.replace(p)
+    return jsonfile.read(path()).get(account)
 
 
 def save(account: str, entry: dict) -> None:
     """Store one mailbox's sign-in, keeping the others."""
-    with _all(path()) as everything:
+    with jsonfile.edit(path(), 0o600) as everything:
         everything[account] = entry
 
 
@@ -63,7 +40,7 @@ def adopt(folder: Path, into: Path) -> list[str]:
     found = {a: folder / name for a, name in OLD.items() if (folder / name).exists()}
     if not found:
         return []
-    with _all(into) as everything:
+    with jsonfile.edit(into, 0o600) as everything:
         for account, f in found.items():
             if account not in everything:
                 entry = json.loads(f.read_text())
